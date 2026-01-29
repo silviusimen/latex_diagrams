@@ -239,6 +239,7 @@ class DiagramGenerator:
         # Generate node definitions
         nodes = []
         node_positions = {}  # Map element name to (x, y) for drawing links
+        group_center_nodes = {}  # Map group name to center node_id for underlined groups
         
         for group_name in sorted(levels.keys(), key=lambda g: -levels[g]):
             level = levels[group_name]
@@ -247,9 +248,20 @@ class DiagramGenerator:
             for i, elem in enumerate(elements):
                 x = start_x + i
                 y = level
-                node_id = elem.lower().replace('+', 'plus').replace('-', 'minus')
+                # Create unique node ID by appending position index if needed
+                base_id = elem.lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p')
+                node_id = f"{base_id}_{int(x)}_{int(y)}"
                 node_positions[elem] = (node_id, x, y)
                 nodes.append(f"\t\t\t\\node ({node_id})   at ({x}, {y}) {{{elem}}};")
+            
+            # Store center node for underlined groups
+            group_obj = self.group_name_to_group[group_name]
+            if group_obj.get('underline', False) and len(elements) > 0:
+                center_idx = len(elements) // 2
+                center_elem = elements[center_idx]
+                center_x = start_x + center_idx
+                center_node_id = f"{center_elem.lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p')}_{int(center_x)}_{int(level)}"
+                group_center_nodes[group_name] = center_node_id
         
         # Generate links
         links_code = []
@@ -265,20 +277,25 @@ class DiagramGenerator:
             
             if has_underline and source == source_group:
                 # Draw underline for the group
-                _, elements = positions[source_group]
+                start_x, elements = positions[source_group]
+                level = levels[source_group]
                 if len(elements) > 1:
                     first_elem = elements[0]
                     last_elem = elements[-1]
-                    first_id = first_elem.lower().replace('+', 'plus').replace('-', 'minus')
-                    last_id = last_elem.lower().replace('+', 'plus').replace('-', 'minus')
+                    first_x = start_x
+                    last_x = start_x + len(elements) - 1
+                    first_base = first_elem.lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p')
+                    last_base = last_elem.lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p')
+                    first_id = f"{first_base}_{int(first_x)}_{int(level)}"
+                    last_id = f"{last_base}_{int(last_x)}_{int(level)}"
                     underlines.append(f"\t\t\t\\draw[blue] ({first_id}.south west) -- ({last_id}.south east);")
                     
-                    # Link from middle element or use calculated middle point
-                    middle_idx = len(elements) // 2
-                    middle_elem = elements[middle_idx]
-                    source_id = middle_elem.lower().replace('+', 'plus').replace('-', 'minus')
+                    # Link from center node
+                    source_id = group_center_nodes[source_group]
                 else:
-                    source_id = elements[0].lower().replace('+', 'plus').replace('-', 'minus')
+                    first_x = start_x
+                    elem_base = elements[0].lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p')
+                    source_id = f"{elem_base}_{int(first_x)}_{int(level)}"
             else:
                 # Regular link from element
                 if source in node_positions:
