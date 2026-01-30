@@ -1,0 +1,36 @@
+\documentclass{article}
+
+\usepackage{graphicx}
+\usepackage{tikz-cd}
+
+
+\begin{document}
+
+\paragraph{}
+		\begin{tikzpicture}[
+			>=Stealth, 
+			line width=2pt, 
+			x=1.0cm,y=2.0cm, 
+			font=\fontsize{14}{14}\selectfont
+			]
+			\input{grid.tex} 
+
+			\node (p1_1_5)   at (1.0, 5) {P1};
+			\node (p2_1_4)   at (1.0, 4) {P2};
+			\node (p3_1_3)   at (1.0, 3) {P3};
+			\node (p4_1_2)   at (1.0, 2) {P4};
+			\node (plus_2_2)   at (2.0, 2) {+};
+			\node (p5_3_2)   at (3.0, 2) {P5};
+			\node (c_1_1)   at (1.0, 1) {C};
+
+			\draw[->, blue] (p1_1_5) -- (p2_1_4);
+			\draw[->, blue] (p2_1_4) -- (p3_1_3);
+			\draw[->, blue] (p3_1_3) -- (p4_1_2);
+			\draw[->, blue] (plus_2_2) -- (c_1_1);
+
+			\draw[blue] (p4_1_2.south west) -- (p5_3_2.south east);
+
+		\end{tikzpicture}%
+\par
+
+\end{document}
