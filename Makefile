@@ -25,7 +25,10 @@ venv:
 	@echo ""
 	@echo "Next step: make install"
 
-install: venv
+install-packages-ubuntu:
+	sudo apt install -y python3 texlive-latex-base texlive-latex-extra imagemagick
+
+install: install-packages-ubuntu venv
 	@echo "Installing dependencies in virtual environment..."
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
