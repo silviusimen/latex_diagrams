@@ -6,7 +6,7 @@ Tests for the diagram generator.
 import unittest
 import json
 import os
-from diagram_generator import DiagramGenerator
+from latex_diagram_generator import DiagramGenerator
 
 
 class TestDiagramGenerator(unittest.TestCase):
@@ -101,10 +101,10 @@ class TestDiagramGenerator(unittest.TestCase):
         self.assertIn('\\begin{tikzpicture}', latex)
         self.assertIn('\\end{tikzpicture}', latex)
         
-        # Check nodes are generated
-        self.assertIn('\\node (p1)', latex)
-        self.assertIn('\\node (p2)', latex)
-        self.assertIn('\\node (plus)', latex)
+        # Check nodes are generated (new format includes coordinates)
+        self.assertIn('{P1}', latex)  # Check node label
+        self.assertIn('{P2}', latex)
+        self.assertIn('{+}', latex)
         
         # Check links are generated
         self.assertIn('\\draw[->, blue]', latex)
@@ -135,9 +135,9 @@ class TestDiagramGenerator(unittest.TestCase):
         self.assertGreater(levels['B'], levels['C'])
         
         latex = generator.generate_latex()
-        self.assertIn('\\node (a)', latex)
-        self.assertIn('\\node (b)', latex)
-        self.assertIn('\\node (c)', latex)
+        self.assertIn('{A}', latex)  # Check node label
+        self.assertIn('{B}', latex)
+        self.assertIn('{C}', latex)
     
     def test_group_with_underline(self):
         """Test group with underline property."""
@@ -181,9 +181,9 @@ class TestDiagramGenerator(unittest.TestCase):
             self.assertIn('>=Stealth', latex)
             self.assertIn('line width=2pt', latex)
         
-        # Verify all expected nodes
-        for node in ['p1', 'p2', 'p3', 'p4', 'plus', 'p5', 'c']:
-            self.assertIn(f'\\node ({node})', latex)
+        # Verify all expected nodes (check labels)
+        for label in ['P1', 'P2', 'P3', 'P4', '+', 'P5', 'C']:
+            self.assertIn(f'{{{label}}}', latex)
     
     def test_multiple_incoming_links(self):
         """Test element with multiple incoming links."""
@@ -208,7 +208,7 @@ class TestDiagramGenerator(unittest.TestCase):
         
         latex = generator.generate_latex()
         # Should have two arrows pointing to C
-        self.assertIn('(c)', latex)
+        self.assertIn('{C}', latex)
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -238,8 +238,8 @@ class TestEdgeCases(unittest.TestCase):
         latex = generator.generate_latex()
         
         # Should generate nodes
-        self.assertIn('\\node (a)', latex)
-        self.assertIn('\\node (b)', latex)
+        self.assertIn('{A}', latex)
+        self.assertIn('{B}', latex)
     
     def test_single_element_group(self):
         """Test group with single element."""
@@ -257,7 +257,7 @@ class TestEdgeCases(unittest.TestCase):
         generator = DiagramGenerator(spec)
         latex = generator.generate_latex()
         
-        self.assertIn('\\node (x)', latex)
+        self.assertIn('{X}', latex)
 
 
 if __name__ == '__main__':

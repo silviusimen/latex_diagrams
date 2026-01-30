@@ -4,7 +4,7 @@ Tests for the text format parser.
 """
 
 import unittest
-from text_parser import parse_text_format
+from latex_diagram_generator import parse_text_format
 
 
 class TestTextFormatParser(unittest.TestCase):
