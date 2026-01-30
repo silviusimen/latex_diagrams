@@ -69,7 +69,7 @@ class TestDiagramGenerator(unittest.TestCase):
     def test_compute_levels(self):
         """Test level computation for vertical positioning."""
         generator = DiagramGenerator(self.example_spec)
-        levels = generator._compute_levels()
+        levels, positions = generator._compute_layout_bottom_up()
         
         # P1 should be at a higher level than P2
         self.assertGreater(levels['P1'], levels['P2'])
@@ -83,8 +83,7 @@ class TestDiagramGenerator(unittest.TestCase):
     def test_horizontal_positions(self):
         """Test horizontal position computation."""
         generator = DiagramGenerator(self.example_spec)
-        levels = generator._compute_levels()
-        positions = generator._compute_horizontal_positions(levels)
+        levels, positions = generator._compute_layout_bottom_up()
         
         # compount_premise_1 has 3 elements
         start_x, elements = positions['compount_premise_1']
@@ -128,7 +127,7 @@ class TestDiagramGenerator(unittest.TestCase):
         }
         
         generator = DiagramGenerator(spec)
-        levels = generator._compute_levels()
+        levels, positions = generator._compute_layout_bottom_up()
         
         # A should be higher than B, B higher than C
         self.assertGreater(levels['A'], levels['B'])
@@ -200,7 +199,7 @@ class TestDiagramGenerator(unittest.TestCase):
         }
         
         generator = DiagramGenerator(spec)
-        levels = generator._compute_levels()
+        levels, positions = generator._compute_layout_bottom_up()
         
         # Both A and B should be higher than C
         self.assertGreater(levels['A'], levels['C'])
