@@ -19,6 +19,251 @@ class LayoutEngine:
         self.group_name_to_group = None  # Set during compute_layout_bottom_up
         self.element_to_group = None
     
+    def _has_outgoing_to_other_group(self, group_name: str, outgoing: Dict) -> bool:
+        """
+        Check if a group has outgoing links to other groups.
+        
+        Args:
+            group_name: Name of group to check
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            True if group has outgoing links to other groups
+        """
+        group = self.group_name_to_group[group_name]
+        
+        if 'elements' in group:
+            for elem in group['elements']:
+                if elem in outgoing:
+                    target_list = outgoing[elem]
+                    target = target_list[0] if isinstance(target_list, list) else target_list
+                    target_group = self.element_to_group.get(target, target)
+                    if target_group != group_name:
+                        return True
+        elif group_name in outgoing:
+            target_list = outgoing[group_name]
+            target = target_list[0] if isinstance(target_list, list) else target_list
+            target_group = self.element_to_group.get(target, target)
+            if target_group != group_name:
+                return True
+        
+        return False
+    
+    def _find_bottom_groups(self, all_groups: Set[str], outgoing: Dict) -> List[str]:
+        """
+        Find groups with no outgoing links to other groups (leaf nodes).
+        
+        Args:
+            all_groups: Set of all group names
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            List of group names with no outgoing links
+        """
+        bottom_groups = []
+        for group_name in all_groups:
+            if not self._has_outgoing_to_other_group(group_name, outgoing):
+                bottom_groups.append(group_name)
+        
+        return bottom_groups
+    
+    def _get_group_target(self, group_name: str, outgoing: Dict) -> str:
+        """
+        Get the target group for a given group.
+        
+        Args:
+            group_name: Name of group
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            Target group name, or None if no target
+        """
+        group = self.group_name_to_group[group_name]
+        
+        if 'elements' in group:
+            for elem in group['elements']:
+                if elem in outgoing:
+                    target_list = outgoing[elem]
+                    target = target_list[0] if isinstance(target_list, list) else target_list
+                    return self.element_to_group.get(target, target)
+        elif group_name in outgoing:
+            target_list = outgoing[group_name]
+            target = target_list[0] if isinstance(target_list, list) else target_list
+            return self.element_to_group.get(target, target)
+        
+        return None
+    
+    def _group_links_to_placed(self, group_name: str, placed_groups: Set[str], outgoing: Dict) -> bool:
+        """
+        Check if a group links to any already-placed groups.
+        
+        Args:
+            group_name: Name of group to check
+            placed_groups: Set of already placed groups
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            True if group links to placed groups
+        """
+        target_group = self._get_group_target(group_name, outgoing)
+        return target_group is not None and target_group in placed_groups
+    
+    def _find_next_layer_groups(self, all_groups: Set[str], placed_groups: Set[str], 
+                                outgoing: Dict) -> List[str]:
+        """
+        Find groups that link to already-placed groups.
+        
+        Args:
+            all_groups: Set of all group names
+            placed_groups: Set of already placed group names
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            List of group names linking to placed groups
+        """
+        next_groups = []
+        for group_name in all_groups:
+            if group_name not in placed_groups:
+                if self._group_links_to_placed(group_name, placed_groups, outgoing):
+                    next_groups.append(group_name)
+        
+        return next_groups
+    
+    def _get_group_destination_x(self, group_name: str, outgoing: Dict, node_positions: Dict) -> float:
+        """
+        Get the destination x-position for a group.
+        
+        Args:
+            group_name: Name of the group
+            outgoing: Dictionary of outgoing links
+            node_positions: Dictionary of element positions
+            
+        Returns:
+            Destination x-position, or 999 if not found
+        """
+        group = self.group_name_to_group[group_name]
+        
+        if 'elements' in group:
+            first_elem = group['elements'][0]
+            if first_elem in outgoing:
+                target_list = outgoing[first_elem]
+                target = target_list[0] if isinstance(target_list, list) else target_list
+                if target in node_positions:
+                    return node_positions[target]
+        elif group_name in outgoing:
+            target_list = outgoing[group_name]
+            target = target_list[0] if isinstance(target_list, list) else target_list
+            if target in node_positions:
+                return node_positions[target]
+        
+        return 999  # Default for groups with no destination
+    
+    def _sort_groups_by_destination(self, groups: List[str], outgoing: Dict, 
+                                    node_positions: Dict) -> List[str]:
+        """
+        Sort groups by their destination x-positions (left to right).
+        
+        Args:
+            groups: List of group names to sort
+            outgoing: Dictionary of outgoing links
+            node_positions: Dictionary of element positions
+            
+        Returns:
+            Sorted list of group names
+        """
+        groups_with_dest = [
+            (group_name, self._get_group_destination_x(group_name, outgoing, node_positions))
+            for group_name in groups
+        ]
+        
+        # Sort by destination x position
+        groups_with_dest.sort(key=lambda x: (x[1], x[0]))
+        return [g[0] for g in groups_with_dest]
+    
+    def _initialize_layout(self, group_name_to_group, element_to_group):
+        """
+        Initialize layout data structures.
+        
+        Args:
+            group_name_to_group: Dictionary mapping group names to group objects
+            element_to_group: Dictionary mapping element names to their containing group
+            
+        Returns:
+            Tuple of (all_groups, levels, positions, node_positions, placed_groups, current_y)
+        """
+        self.group_name_to_group = group_name_to_group
+        self.element_to_group = element_to_group
+        
+        all_groups = set(group_name_to_group.keys())
+        levels = {}  # group_name -> y_level
+        positions = {}  # group_name -> (start_x, elements)
+        node_positions = {}  # elem -> x position
+        placed_groups = set()
+        current_y = 0
+        
+        return all_groups, levels, positions, node_positions, placed_groups, current_y
+    
+    def _place_initial_bottom_groups(self, all_groups, outgoing, incoming, current_y,
+                                    levels, positions, node_positions, placed_groups):
+        """
+        Find and place bottom groups (leaf nodes).
+        
+        Args:
+            all_groups: Set of all group names
+            outgoing, incoming: Link dictionaries
+            current_y: Current y-level
+            levels, positions, node_positions, placed_groups: Dicts to update
+            
+        Returns:
+            Updated current_y (max y-level used)
+        """
+        bottom_groups = self._find_bottom_groups(all_groups, outgoing)
+        print(f"\n=== Bottom-Up Layout ===")
+        print(f"Bottom groups: {bottom_groups}")
+        
+        max_y_used = self._place_bottom_groups_intelligently(
+            bottom_groups, current_y, levels, positions, node_positions, outgoing, incoming
+        )
+        placed_groups.update(bottom_groups)
+        return max_y_used
+    
+    def _process_next_layer(self, iteration, all_groups, placed_groups, outgoing, incoming,
+                           current_y, levels, positions, node_positions):
+        """
+        Process next layer of groups in bottom-up traversal.
+        
+        Args:
+            iteration: Current iteration number
+            all_groups: Set of all group names
+            placed_groups: Set of already placed groups
+            outgoing, incoming: Link dictionaries
+            current_y: Current y-level
+            levels, positions, node_positions: Dicts to update
+            
+        Returns:
+            List of groups placed in this iteration
+        """
+        # Find groups linking to placed groups
+        next_groups = self._find_next_layer_groups(all_groups, placed_groups, outgoing)
+        
+        if not next_groups:
+            # No more groups link to placed groups, place remaining
+            next_groups = [g for g in all_groups if g not in placed_groups]
+        
+        if not next_groups:
+            return []
+        
+        print(f"\nIteration {iteration}: Processing {len(next_groups)} groups")
+        
+        # Sort groups by destination position and place them
+        sorted_groups = self._sort_groups_by_destination(next_groups, outgoing, node_positions)
+        self._place_groups_on_row_with_overflow(
+            sorted_groups, current_y, levels, positions, node_positions, 
+            incoming, outgoing, placed_groups
+        )
+        
+        return sorted_groups
+    
     def compute_layout_bottom_up(self, group_name_to_group, element_to_group, 
                                  outgoing, incoming) -> Tuple[Dict[str, int], Dict[str, Tuple[float, List[str]]]]:
         """
@@ -40,132 +285,195 @@ class LayoutEngine:
         Returns:
             Tuple of (levels dict, positions dict)
         """
-        self.group_name_to_group = group_name_to_group
-        self.element_to_group = element_to_group
+        # Initialize data structures
+        all_groups, levels, positions, node_positions, placed_groups, current_y = \
+            self._initialize_layout(group_name_to_group, element_to_group)
         
-        all_groups = set(group_name_to_group.keys())
+        # Find and place bottom groups
+        current_y = self._place_initial_bottom_groups(
+            all_groups, outgoing, incoming, current_y,
+            levels, positions, node_positions, placed_groups
+        )
         
-        levels = {}  # group_name -> y_level
-        positions = {}  # group_name -> (start_x, elements)
-        node_positions = {}  # elem -> x position
-        
-        placed_groups = set()
-        current_y = 0
-        
-        # Find bottom groups (those with no outgoing links to other groups)
-        bottom_groups = []
-        for group_name in all_groups:
-            group = group_name_to_group[group_name]
-            has_outgoing = False
-            
-            if 'elements' in group:
-                for elem in group['elements']:
-                    if elem in outgoing:
-                        target_list = outgoing[elem]
-                        target = target_list[0] if isinstance(target_list, list) else target_list
-                        target_group = element_to_group.get(target, target)
-                        if target_group != group_name:
-                            has_outgoing = True
-                            break
-            elif group_name in outgoing:
-                target_list = outgoing[group_name]
-                target = target_list[0] if isinstance(target_list, list) else target_list
-                target_group = element_to_group.get(target, target)
-                if target_group != group_name:
-                    has_outgoing = True
-            
-            if not has_outgoing:
-                bottom_groups.append(group_name)
-        
-        print(f"\n=== Bottom-Up Layout ===")
-        print(f"Bottom groups: {bottom_groups}")
-        
-        # Place bottom groups with special handling for groups that point to each other
-        max_y_used = self._place_bottom_groups_intelligently(bottom_groups, current_y, levels, positions, 
-                                                              node_positions, outgoing, incoming)
-        placed_groups.update(bottom_groups)
-        
-        # Start next iteration from the highest y-level used
-        current_y = max_y_used
-        
-        # Iterate upward
+        # Iterate upward through remaining layers
         iteration = 0
         while len(placed_groups) < len(all_groups):
             iteration += 1
             current_y += 1
             
-            # Find groups that link to already-placed groups
-            next_groups = []
-            for group_name in all_groups:
-                if group_name in placed_groups:
-                    continue
-                
-                group = group_name_to_group[group_name]
-                links_to_placed = False
-                
-                if 'elements' in group:
-                    for elem in group['elements']:
-                        if elem in outgoing:
-                            target_list = outgoing[elem]
-                            target = target_list[0] if isinstance(target_list, list) else target_list
-                            target_group = element_to_group.get(target, target)
-                            if target_group in placed_groups:
-                                links_to_placed = True
-                                break
-                elif group_name in outgoing:
-                    target_list = outgoing[group_name]
-                    target = target_list[0] if isinstance(target_list, list) else target_list
-                    target_group = element_to_group.get(target, target)
-                    if target_group in placed_groups:
-                        links_to_placed = True
-                
-                if links_to_placed:
-                    next_groups.append(group_name)
-            
-            if not next_groups:
-                # No more groups link to placed groups, place remaining
-                next_groups = [g for g in all_groups if g not in placed_groups]
-            
-            if not next_groups:
-                break
-            
-            print(f"\nIteration {iteration}: Processing {len(next_groups)} groups")
-            
-            # Order groups by their destination positions (left to right)
-            groups_with_dest = []
-            for group_name in next_groups:
-                group = group_name_to_group[group_name]
-                dest_x = None
-                
-                if 'elements' in group:
-                    first_elem = group['elements'][0]
-                    if first_elem in outgoing:
-                        target_list = outgoing[first_elem]
-                        target = target_list[0] if isinstance(target_list, list) else target_list
-                        if target in node_positions:
-                            dest_x = node_positions[target]
-                elif group_name in outgoing:
-                    target_list = outgoing[group_name]
-                    target = target_list[0] if isinstance(target_list, list) else target_list
-                    if target in node_positions:
-                        dest_x = node_positions[target]
-                
-                groups_with_dest.append((group_name, dest_x if dest_x is not None else 999))
-            
-            # Sort by destination x position
-            groups_with_dest.sort(key=lambda x: (x[1], x[0]))
-            sorted_groups = [g[0] for g in groups_with_dest]
-            
-            # Try to place all groups on current row
-            success = self._place_groups_on_row_with_overflow(
-                sorted_groups, current_y, levels, positions, node_positions, 
-                incoming, outgoing, placed_groups
+            sorted_groups = self._process_next_layer(
+                iteration, all_groups, placed_groups, outgoing, incoming,
+                current_y, levels, positions, node_positions
             )
+            
+            if not sorted_groups:
+                break
             
             placed_groups.update(sorted_groups)
         
         print(f"\n=== Layout Complete: {len(placed_groups)} groups placed ===")
         return levels, positions
+    
+    def _get_target_from_list(self, target_list):
+        """
+        Extract single target from target list (handles both list and single value).
+        
+        Args:
+            target_list: Either a list of targets or a single target
+            
+        Returns:
+            Single target value
+        """
+        return target_list[0] if isinstance(target_list, list) else target_list
+    
+    def _find_group_target_in_set(self, group_name: str, group_names: List[str],
+                                  outgoing: Dict) -> str:
+        """
+        Find target group for a group if it exists in the given set.
+        
+        Args:
+            group_name: Source group name
+            group_names: Set of valid target group names
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            Target group name if found in group_names, else None
+        """
+        group = self.group_name_to_group[group_name]
+        original_name = group.get('name', group_name)
+        
+        # Check if the original group name points to another group
+        if original_name in outgoing:
+            target = self._get_target_from_list(outgoing[original_name])
+            target_group = self.element_to_group.get(target, target)
+            if target_group in group_names:
+                return target_group
+        
+        # Check if first element points to another group
+        if 'elements' in group:
+            first_elem = group['elements'][0]
+            if first_elem in outgoing:
+                target = self._get_target_from_list(outgoing[first_elem])
+                target_group = self.element_to_group.get(target, target)
+                if target_group in group_names:
+                    return target_group
+        
+        return None
+    
+    def _find_bottom_group_dependencies(self, group_names: List[str], outgoing: Dict) -> Dict[str, str]:
+        """
+        Find dependencies among bottom groups (groups pointing to each other).
+        
+        Args:
+            group_names: List of bottom group names
+            outgoing: Dictionary of outgoing links
+            
+        Returns:
+            Dictionary mapping source group to target group
+        """
+        source_to_target = {}
+        for group_name in group_names:
+            target_group = self._find_group_target_in_set(group_name, group_names, outgoing)
+            if target_group:
+                source_to_target[group_name] = target_group
+        
+        return source_to_target
+    
+    def _place_target_groups(self, targets: Set[str], y_level: int, levels: Dict, 
+                            positions: Dict, node_positions: Dict) -> None:
+        """
+        Place target groups centered at x=6.0.
+        
+        Args:
+            targets: Set of target group names
+            y_level: Y-coordinate for placement
+            levels, positions, node_positions: Dicts to update
+        """
+        for target in targets:
+            target_group = self.group_name_to_group[target]
+            target_elements = target_group.get('elements', [target])
+            
+            # Place target centered at x=6.0
+            if len(target_elements) > 1:
+                target_width = (len(target_elements) - 1) * self.WITHIN_GROUP_SPACING
+                target_start = 6.0 - target_width / 2.0
+            else:
+                target_start = 6.0
+            
+            levels[target] = y_level
+            positions[target] = (target_start, target_elements)
+            
+            for i, elem in enumerate(target_elements):
+                node_positions[elem] = target_start + i * self.WITHIN_GROUP_SPACING
+    
+    def _place_source_groups_above_targets(self, source_to_target: Dict, y_level: int,
+                                           levels: Dict, positions: Dict, node_positions: Dict) -> None:
+        """
+        Place source groups centered above their target groups.
+        
+        Args:
+            source_to_target: Mapping of source to target groups
+            y_level: Y-coordinate for placement (sources go at y_level + 1)
+            levels, positions, node_positions: Dicts to update
+        """
+        for source, target in source_to_target.items():
+            if target in positions:
+                target_start, target_elements = positions[target]
+                
+                # Calculate center of target
+                if len(target_elements) > 1:
+                    target_width = (len(target_elements) - 1) * self.WITHIN_GROUP_SPACING
+                    target_center = target_start + target_width / 2.0
+                else:
+                    target_center = target_start
+                
+                # Place source centered above target
+                source_group = self.group_name_to_group[source]
+                source_elements = source_group.get('elements', [source])
+                
+                if len(source_elements) > 1:
+                    source_width = (len(source_elements) - 1) * self.WITHIN_GROUP_SPACING
+                    source_start = target_center - source_width / 2.0
+                else:
+                    source_start = target_center
+                
+                levels[source] = y_level + 1
+                positions[source] = (source_start, source_elements)
+                
+                for i, elem in enumerate(source_elements):
+                    node_positions[elem] = source_start + i * self.WITHIN_GROUP_SPACING
+    
+    def _place_dependent_bottom_groups(self, source_to_target, group_names, y_level,
+                                       levels, positions, node_positions):
+        """
+        Place bottom groups that have dependencies among themselves.
+        
+        Args:
+            source_to_target: Dict mapping source groups to target groups
+            group_names: All bottom group names
+            y_level: Starting y-level
+            levels, positions, node_positions: Dicts to update
+            
+        Returns:
+            Maximum y-level used
+        """
+        targets = set(source_to_target.values())
+        sources = set(source_to_target.keys())
+        independent = [g for g in group_names if g not in sources and g not in targets]
+        
+        # Place targets at y_level (bottom)
+        self._place_target_groups(targets, y_level, levels, positions, node_positions)
+        
+        # Place sources at y_level + 1 (one row above), centered above their targets
+        self._place_source_groups_above_targets(source_to_target, y_level, levels, positions, node_positions)
+        
+        # Place independent groups at y_level with the targets
+        if independent:
+            self._place_groups_on_row(independent, y_level, levels, positions, 
+                                      node_positions, center=True)
+        
+        # Return max y-level used (sources are at y_level + 1)
+        return y_level + 1
     
     def _place_bottom_groups_intelligently(self, group_names, y_level, levels, positions, 
                                            node_positions, outgoing, incoming):
@@ -180,92 +488,84 @@ class LayoutEngine:
         if not group_names:
             return y_level
         
-        # Find if any bottom groups point to other bottom groups
-        source_to_target = {}
-        for group_name in group_names:
-            group = self.group_name_to_group[group_name]
-            original_name = group.get('name', group_name)
-            
-            # Check if the original group name (the one used in links) points to another group
-            if original_name in outgoing:
-                target_list = outgoing[original_name]
-                target = target_list[0] if isinstance(target_list, list) else target_list
-                target_group = self.element_to_group.get(target, target)
-                if target_group in group_names:
-                    source_to_target[group_name] = target_group
-            elif 'elements' in group:
-                first_elem = group['elements'][0]
-                if first_elem in outgoing:
-                    target_list = outgoing[first_elem]
-                    target = target_list[0] if isinstance(target_list, list) else target_list
-                    target_group = self.element_to_group.get(target, target)
-                    if target_group in group_names:
-                        source_to_target[group_name] = target_group
+        # Find dependencies among bottom groups
+        source_to_target = self._find_bottom_group_dependencies(group_names, outgoing)
         
         if source_to_target:
             # Place source-target pairs with vertical alignment
-            targets = set(source_to_target.values())
-            sources = set(source_to_target.keys())
-            independent = [g for g in group_names if g not in sources and g not in targets]
-            
-            # Place targets at y_level (bottom), sources at y_level + 1 (one row above)
-            for target in targets:
-                target_group = self.group_name_to_group[target]
-                target_elements = target_group.get('elements', [target])
-                
-                # Place target centered at x=6.0
-                if len(target_elements) > 1:
-                    target_width = (len(target_elements) - 1) * self.WITHIN_GROUP_SPACING
-                    target_start = 6.0 - target_width / 2.0
-                else:
-                    target_start = 6.0
-                
-                levels[target] = y_level
-                positions[target] = (target_start, target_elements)
-                
-                for i, elem in enumerate(target_elements):
-                    node_positions[elem] = target_start + i * self.WITHIN_GROUP_SPACING
-            
-            # Place sources at y_level + 1, centered above their targets
-            for source, target in source_to_target.items():
-                if target in positions:
-                    target_start, target_elements = positions[target]
-                    
-                    # Calculate center of target
-                    if len(target_elements) > 1:
-                        target_width = (len(target_elements) - 1) * self.WITHIN_GROUP_SPACING
-                        target_center = target_start + target_width / 2.0
-                    else:
-                        target_center = target_start
-                    
-                    # Place source centered above target
-                    source_group = self.group_name_to_group[source]
-                    source_elements = source_group.get('elements', [source])
-                    
-                    if len(source_elements) > 1:
-                        source_width = (len(source_elements) - 1) * self.WITHIN_GROUP_SPACING
-                        source_start = target_center - source_width / 2.0
-                    else:
-                        source_start = target_center
-                    
-                    levels[source] = y_level + 1
-                    positions[source] = (source_start, source_elements)
-                    
-                    for i, elem in enumerate(source_elements):
-                        node_positions[elem] = source_start + i * self.WITHIN_GROUP_SPACING
-            
-            # Place independent groups at y_level with the targets
-            if independent:
-                self._place_groups_on_row(independent, y_level, levels, positions, 
-                                          node_positions, center=True)
-            
-            # Return max y-level used (sources are at y_level + 1)
-            return y_level + 1 if source_to_target else y_level
+            return self._place_dependent_bottom_groups(
+                source_to_target, group_names, y_level,
+                levels, positions, node_positions
+            )
         else:
             # No dependencies among bottom groups, just center them
             self._place_groups_on_row(group_names, y_level, levels, positions, 
                                       node_positions, center=True)
             return y_level
+    
+    def _calculate_group_widths(self, group_names: List[str]) -> List[float]:
+        """
+        Calculate widths for a list of groups.
+        
+        Args:
+            group_names: List of group names
+            
+        Returns:
+            List of group widths
+        """
+        group_widths = []
+        for group_name in group_names:
+            group = self.group_name_to_group[group_name]
+            if 'elements' in group:
+                num_elements = len(group['elements'])
+                width = (num_elements - 1) * self.WITHIN_GROUP_SPACING if num_elements > 1 else 0
+            else:
+                width = 0
+            group_widths.append(width)
+        return group_widths
+    
+    def _calculate_starting_x(self, group_names: List[str], group_widths: List[float], center: bool) -> float:
+        """
+        Calculate starting x position for a row of groups.
+        
+        Args:
+            group_names: List of group names
+            group_widths: List of corresponding group widths
+            center: If True, center around x=6.0
+            
+        Returns:
+            Starting x-coordinate
+        """
+        if center:
+            total_width = sum(group_widths) + (len(group_names) - 1) * 2.0  # 2.0 spacing between groups
+            return 6.0 - total_width / 2.0
+        return 0.0
+    
+    def _place_group_at_position(self, group_name: str, width: float, current_x: float,
+                                 y_level: int, levels: Dict, positions: Dict, node_positions: Dict) -> float:
+        """
+        Place a single group at specified position and update data structures.
+        
+        Args:
+            group_name: Name of group to place
+            width: Width of the group
+            current_x: Current x-coordinate
+            y_level: Y-coordinate
+            levels, positions, node_positions: Dicts to update
+            
+        Returns:
+            Next x-coordinate for subsequent groups
+        """
+        group = self.group_name_to_group[group_name]
+        elements = group.get('elements', [group_name])
+        
+        levels[group_name] = y_level
+        positions[group_name] = (current_x, elements)
+        
+        for i, elem in enumerate(elements):
+            node_positions[elem] = current_x + i * self.WITHIN_GROUP_SPACING
+        
+        return current_x + width + 2.0  # Move to next group position
     
     def _place_groups_on_row(self, group_names, y_level, levels, positions, node_positions, center=False):
         """
@@ -282,36 +582,237 @@ class LayoutEngine:
         if not group_names:
             return
         
-        # Calculate total width needed
-        group_widths = []
-        for group_name in group_names:
-            group = self.group_name_to_group[group_name]
-            if 'elements' in group:
-                num_elements = len(group['elements'])
-                width = (num_elements - 1) * self.WITHIN_GROUP_SPACING if num_elements > 1 else 0
-            else:
-                width = 0
-            group_widths.append(width)
+        # Calculate widths for all groups
+        group_widths = self._calculate_group_widths(group_names)
         
         # Calculate starting x position
-        if center:
-            total_width = sum(group_widths) + (len(group_names) - 1) * 2.0  # 2.0 spacing between groups
-            start_x = 6.0 - total_width / 2.0
-        else:
-            start_x = 0.0
+        current_x = self._calculate_starting_x(group_names, group_widths, center)
         
-        current_x = start_x
+        # Place each group
         for group_name, width in zip(group_names, group_widths):
-            group = self.group_name_to_group[group_name]
-            elements = group.get('elements', [group_name])
+            current_x = self._place_group_at_position(
+                group_name, width, current_x, y_level, levels, positions, node_positions
+            )
+    
+    def _group_has_incoming(self, group_name: str, incoming: Dict) -> bool:
+        """
+        Check if a group has any incoming links.
+        
+        Args:
+            group_name: Name of group to check
+            incoming: Dictionary of incoming links
             
-            levels[group_name] = y_level
-            positions[group_name] = (current_x, elements)
+        Returns:
+            True if group has incoming links
+        """
+        group = self.group_name_to_group[group_name]
+        
+        if 'elements' in group:
+            for elem in group['elements']:
+                if elem in incoming:
+                    return True
+        elif group_name in incoming:
+            return True
+        
+        return False
+    
+    def _classify_groups_by_incoming(self, group_names: List[str], incoming: Dict) -> Tuple[List[str], List[str]]:
+        """
+        Classify groups by whether they have inbound links.
+        
+        Args:
+            group_names: List of group names to classify
+            incoming: Dictionary of incoming links
             
-            for i, elem in enumerate(elements):
-                node_positions[elem] = current_x + i * self.WITHIN_GROUP_SPACING
+        Returns:
+            Tuple of (groups_with_incoming, groups_without_incoming)
+        """
+        groups_with_incoming = []
+        groups_without_incoming = []
+        
+        for group_name in group_names:
+            if self._group_has_incoming(group_name, incoming):
+                groups_with_incoming.append(group_name)
+            else:
+                groups_without_incoming.append(group_name)
+        
+        return groups_with_incoming, groups_without_incoming
+    
+    def _select_groups_by_priority(self, row_groups: List[str], groups_with_incoming: List[str],
+                                   groups_without_incoming: List[str]) -> List[str]:
+        """
+        Select groups to move based on priority (prefer groups with incoming links).
+        
+        Args:
+            row_groups: Groups currently on the row
+            groups_with_incoming: Groups that have incoming links (priority)
+            groups_without_incoming: Groups without incoming links
             
-            current_x += width + 2.0  # Move to next group position
+        Returns:
+            List of groups to consider for moving
+        """
+        groups_to_move = [g for g in row_groups if g in groups_with_incoming]
+        if not groups_to_move:
+            groups_to_move = [g for g in row_groups if g in groups_without_incoming]
+        return groups_to_move
+    
+    def _sort_groups_by_distance_from_center(self, groups_to_move: List[str], 
+                                             outgoing: Dict, node_positions: Dict) -> List[str]:
+        """
+        Sort groups by their distance from center (x=6.0).
+        
+        Args:
+            groups_to_move: Groups to sort
+            outgoing: Dictionary of outgoing links
+            node_positions: Current node positions
+            
+        Returns:
+            List of groups sorted by distance from center
+        """
+        center_x = 6.0
+        groups_with_target_x = []
+        for g in groups_to_move:
+            target_x = self._get_group_target_x(g, outgoing, node_positions)
+            groups_with_target_x.append((g, abs(target_x - center_x)))
+        
+        # Sort by distance from center
+        groups_with_target_x.sort(key=lambda x: x[1])
+        return [g for g, _ in groups_with_target_x]
+    
+    def _move_groups_until_fit(self, sorted_groups: List[str], row_groups: List[str],
+                              max_width: float) -> Tuple[List[str], List[str]]:
+        """
+        Move groups to next row until remaining groups fit in max width.
+        
+        Args:
+            sorted_groups: Groups sorted by priority
+            row_groups: All groups on the row
+            max_width: Maximum allowed row width
+            
+        Returns:
+            Tuple of (keep_on_row, move_to_next)
+        """
+        move_to_next = []
+        keep_on_row = []
+        
+        for g in sorted_groups:
+            move_to_next.append(g)
+            test_keep = [x for x in row_groups if x not in move_to_next]
+            if self.calculate_row_width(test_keep) <= max_width:
+                keep_on_row = test_keep
+                break
+        
+        return keep_on_row, move_to_next
+    
+    def _split_overcrowded_row(self, row_groups: List[str], groups_with_incoming: List[str],
+                               groups_without_incoming: List[str], outgoing: Dict,
+                               node_positions: Dict, max_width: float) -> Tuple[List[str], List[str]]:
+        """
+        Split an overcrowded row into keep and move groups.
+        
+        Args:
+            row_groups: Groups currently on the row
+            groups_with_incoming: Groups that have incoming links (priority)
+            groups_without_incoming: Groups without incoming links
+            outgoing: Dictionary of outgoing links
+            node_positions: Current node positions
+            max_width: Maximum allowed row width
+            
+        Returns:
+            Tuple of (keep_on_row, move_to_next)
+        """
+        # Select groups to move based on priority
+        groups_to_move = self._select_groups_by_priority(
+            row_groups, groups_with_incoming, groups_without_incoming
+        )
+        
+        if groups_to_move:
+            # Sort by distance from center
+            sorted_groups = self._sort_groups_by_distance_from_center(
+                groups_to_move, outgoing, node_positions
+            )
+            
+            # Move groups until remaining fit
+            keep_on_row, move_to_next = self._move_groups_until_fit(
+                sorted_groups, row_groups, max_width
+            )
+            
+            if not keep_on_row:
+                # Still too wide, split in half as fallback
+                mid = len(row_groups) // 2
+                keep_on_row = row_groups[:mid]
+                move_to_next = row_groups[mid:]
+        else:
+            # No prioritized groups, split in half
+            mid = len(row_groups) // 2
+            keep_on_row = row_groups[:mid]
+            move_to_next = row_groups[mid:]
+        
+        return keep_on_row, move_to_next
+    
+    def _split_rows_until_fit(self, rows, groups_with_incoming, groups_without_incoming,
+                             outgoing, node_positions, max_row_width, start_y):
+        """
+        Split rows until all fit within maximum width.
+        
+        Args:
+            rows: List of row groups
+            groups_with_incoming, groups_without_incoming: Classified groups
+            outgoing: Dictionary of outgoing links
+            node_positions: Current node positions
+            max_row_width: Maximum allowed row width
+            start_y: Starting y-level
+            
+        Returns:
+            List of rows that fit within width constraints
+        """
+        while True:
+            all_fit = True
+            
+            for row_idx, row_groups in enumerate(rows):
+                if not row_groups:
+                    continue
+                
+                total_width = self.calculate_row_width(row_groups)
+                
+                if total_width > max_row_width:
+                    all_fit = False
+                    print(f"  Row {start_y + row_idx} too wide ({total_width:.1f} > {max_row_width}), splitting...")
+                    
+                    keep_on_row, move_to_next = self._split_overcrowded_row(
+                        row_groups, groups_with_incoming, groups_without_incoming,
+                        outgoing, node_positions, max_row_width
+                    )
+                    
+                    rows[row_idx] = keep_on_row
+                    if row_idx + 1 < len(rows):
+                        rows[row_idx + 1] = move_to_next + rows[row_idx + 1]
+                    else:
+                        rows.append(move_to_next)
+                    break
+            
+            if all_fit:
+                break
+        
+        return rows
+    
+    def _place_split_rows(self, rows, start_y, levels, positions, node_positions, outgoing):
+        """
+        Place groups on their assigned rows.
+        
+        Args:
+            rows: List of row groups to place
+            start_y: Starting y-level
+            levels, positions, node_positions: Dicts to update
+            outgoing: Dictionary of outgoing links
+        """
+        for row_idx, row_groups in enumerate(rows):
+            if row_groups:
+                y = start_y + row_idx
+                self._place_groups_on_row_centered_by_target(
+                    row_groups, y, levels, positions, node_positions, outgoing
+                )
+                print(f"  Placed {len(row_groups)} groups on row {y}: {row_groups}")
     
     def _place_groups_on_row_with_overflow(self, group_names, start_y, levels, positions, 
                                            node_positions, incoming, outgoing, placed_groups):
@@ -337,102 +838,20 @@ class LayoutEngine:
         
         MAX_ROW_WIDTH = 20.0  # Maximum x-span for a row
         
-        # Classify groups by whether they have inbound links
-        groups_with_incoming = []
-        groups_without_incoming = []
+        # Classify groups by incoming links
+        groups_with_incoming, groups_without_incoming = self._classify_groups_by_incoming(
+            group_names, incoming
+        )
         
-        for group_name in group_names:
-            has_incoming = False
-            group = self.group_name_to_group[group_name]
-            
-            if 'elements' in group:
-                for elem in group['elements']:
-                    if elem in incoming:
-                        has_incoming = True
-                        break
-            elif group_name in incoming:
-                has_incoming = True
-            
-            if has_incoming:
-                groups_with_incoming.append(group_name)
-            else:
-                groups_without_incoming.append(group_name)
-        
-        # Try to place all on one row first
+        # Try to fit all groups, splitting rows as needed
         rows = [group_names]
-        current_y = start_y
-        
-        while True:
-            all_fit = True
-            
-            for row_idx, row_groups in enumerate(rows):
-                if not row_groups:
-                    continue
-                
-                # Calculate width for this row
-                total_width = self.calculate_row_width(row_groups)
-                
-                if total_width > MAX_ROW_WIDTH:
-                    all_fit = False
-                    print(f"  Row {current_y + row_idx} too wide ({total_width:.1f} > {MAX_ROW_WIDTH}), splitting...")
-                    
-                    # Split row - move groups with priority to new row
-                    keep_on_row = []
-                    move_to_next = []
-                    
-                    # Priority: groups with incoming links from center
-                    groups_to_move = [g for g in row_groups if g in groups_with_incoming]
-                    if not groups_to_move:
-                        groups_to_move = [g for g in row_groups if g in groups_without_incoming]
-                    
-                    if groups_to_move:
-                        # Find center and move closest group
-                        center_x = 6.0
-                        groups_with_target_x = []
-                        for g in groups_to_move:
-                            target_x = self._get_group_target_x(g, outgoing, node_positions)
-                            groups_with_target_x.append((g, abs(target_x - center_x)))
-                        
-                        # Sort by distance from center
-                        groups_with_target_x.sort(key=lambda x: x[1])
-                        
-                        # Move enough groups to make row fit
-                        for g, _ in groups_with_target_x:
-                            move_to_next.append(g)
-                            test_keep = [x for x in row_groups if x not in move_to_next]
-                            if self.calculate_row_width(test_keep) <= MAX_ROW_WIDTH:
-                                keep_on_row = test_keep
-                                break
-                        
-                        if not keep_on_row:
-                            # Still too wide, move half
-                            mid = len(row_groups) // 2
-                            keep_on_row = row_groups[:mid]
-                            move_to_next = row_groups[mid:]
-                    else:
-                        # Fallback: split in half
-                        mid = len(row_groups) // 2
-                        keep_on_row = row_groups[:mid]
-                        move_to_next = row_groups[mid:]
-                    
-                    rows[row_idx] = keep_on_row
-                    if row_idx + 1 < len(rows):
-                        rows[row_idx + 1] = move_to_next + rows[row_idx + 1]
-                    else:
-                        rows.append(move_to_next)
-                    break
-            
-            if all_fit:
-                break
+        rows = self._split_rows_until_fit(
+            rows, groups_with_incoming, groups_without_incoming,
+            outgoing, node_positions, MAX_ROW_WIDTH, start_y
+        )
         
         # Place groups on their assigned rows
-        for row_idx, row_groups in enumerate(rows):
-            if row_groups:
-                y = start_y + row_idx
-                self._place_groups_on_row_centered_by_target(
-                    row_groups, y, levels, positions, node_positions, outgoing
-                )
-                print(f"  Placed {len(row_groups)} groups on row {y}: {row_groups}")
+        self._place_split_rows(rows, start_y, levels, positions, node_positions, outgoing)
         
         return True
     
@@ -474,41 +893,90 @@ class LayoutEngine:
         
         return 6.0  # Default center
     
+    def _calculate_group_width(self, elements: List[str]) -> float:
+        """
+        Calculate the width of a group based on its elements.
+        
+        Args:
+            elements: List of element names
+            
+        Returns:
+            Width in coordinate units
+        """
+        if len(elements) > 1:
+            return (len(elements) - 1) * self.WITHIN_GROUP_SPACING
+        return 0.0
+    
+    def _adjust_position_for_collisions(self, start_x: float, width: float, y_level: int,
+                                        group_name: str, levels: Dict, positions: Dict) -> float:
+        """
+        Adjust group position to avoid collisions with already placed groups.
+        
+        Args:
+            start_x: Desired starting x position
+            width: Width of the group
+            y_level: Y-level of placement
+            group_name: Name of group being placed
+            levels: Dict of group levels
+            positions: Dict of group positions
+            
+        Returns:
+            Adjusted starting x position
+        """
+        REQUIRED_SPACING = 2.0
+        adjusted_x = start_x
+        
+        for other_group in levels:
+            if levels[other_group] == y_level and other_group != group_name:
+                other_start, other_elements = positions[other_group]
+                other_width = self._calculate_group_width(other_elements)
+                other_end = other_start + other_width
+                my_end = adjusted_x + width
+                
+                # Check for overlap (need REQUIRED_SPACING between groups)
+                if not (my_end + REQUIRED_SPACING < other_start or adjusted_x > other_end + REQUIRED_SPACING):
+                    # Overlap detected! Shift right
+                    adjusted_x = other_end + REQUIRED_SPACING
+        
+        return adjusted_x
+    
+    def _place_single_group_centered(self, group_name: str, y_level: int, outgoing: Dict,
+                                     levels: Dict, positions: Dict, node_positions: Dict):
+        """
+        Place a single group centered above its target with collision avoidance.
+        
+        Args:
+            group_name: Name of group to place
+            y_level: Y-level for placement
+            outgoing: Dictionary of outgoing links
+            levels, positions, node_positions: Dicts to update
+        """
+        group = self.group_name_to_group[group_name]
+        elements = group.get('elements', [group_name])
+        
+        # Get target position and calculate group width
+        target_x = self._get_group_target_x(group_name, outgoing, node_positions)
+        width = self._calculate_group_width(elements)
+        
+        # Center above target
+        start_x = target_x - width / 2.0
+        
+        # Adjust for collisions
+        start_x = self._adjust_position_for_collisions(
+            start_x, width, y_level, group_name, levels, positions
+        )
+        
+        # Update positions
+        levels[group_name] = y_level
+        positions[group_name] = (start_x, elements)
+        
+        for i, elem in enumerate(elements):
+            node_positions[elem] = start_x + i * self.WITHIN_GROUP_SPACING
+    
     def _place_groups_on_row_centered_by_target(self, group_names, y_level, levels, 
                                                  positions, node_positions, outgoing):
         """Place groups on a row, each centered above its target."""
         for group_name in group_names:
-            group = self.group_name_to_group[group_name]
-            elements = group.get('elements', [group_name])
-            
-            # Get target position
-            target_x = self._get_group_target_x(group_name, outgoing, node_positions)
-            
-            # Calculate group width
-            if len(elements) > 1:
-                width = (len(elements) - 1) * self.WITHIN_GROUP_SPACING
-            else:
-                width = 0
-            
-            # Center above target
-            start_x = target_x - width / 2.0
-            
-            # Check for collisions with already placed groups at this level
-            for other_group in levels:
-                if levels[other_group] == y_level and other_group != group_name:
-                    other_start, other_elements = positions[other_group]
-                    other_width = (len(other_elements) - 1) * self.WITHIN_GROUP_SPACING if len(other_elements) > 1 else 0
-                    other_end = other_start + other_width
-                    
-                    my_end = start_x + width
-                    
-                    # Check for overlap (need 2.0 spacing)
-                    if not (my_end + 2.0 < other_start or start_x > other_end + 2.0):
-                        # Overlap! Shift right
-                        start_x = other_end + 2.0
-            
-            levels[group_name] = y_level
-            positions[group_name] = (start_x, elements)
-            
-            for i, elem in enumerate(elements):
-                node_positions[elem] = start_x + i * self.WITHIN_GROUP_SPACING
+            self._place_single_group_centered(
+                group_name, y_level, outgoing, levels, positions, node_positions
+            )
