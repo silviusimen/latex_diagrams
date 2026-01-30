@@ -259,5 +259,174 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIn('{X}', latex)
 
 
+class TestGeneratorBranchCoverage(unittest.TestCase):
+    """Test branch coverage for generator methods."""
+    
+    def test_custom_template_path(self):
+        """Test generator with custom template path."""
+        spec = {
+            "groups": [{"name": "A"}],
+            "links": {}
+        }
+        
+        # Use default template path
+        generator = DiagramGenerator(spec, template_path='templates/template.tex')
+        latex = generator.generate_latex()
+        
+        self.assertIn('\\documentclass{article}', latex)
+    
+    def test_dependency_graph_complex(self):
+        """Test dependency graph with complex relationships."""
+        spec = {
+            "groups": [
+                {"name": "A"},
+                {"name": "B"},
+                {"name": "C"},
+                {"name": "D"}
+            ],
+            "links": {
+                "A": "C",
+                "B": "C",
+                "C": "D"
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        outgoing, incoming = generator._build_dependency_graph()
+        
+        # Check outgoing
+        self.assertEqual(outgoing['A'], ['C'])
+        self.assertEqual(outgoing['B'], ['C'])
+        self.assertEqual(outgoing['C'], ['D'])
+        
+        # Check incoming
+        self.assertIn('A', incoming['C'])
+        self.assertIn('B', incoming['C'])
+        self.assertIn('C', incoming['D'])
+    
+    def test_multi_element_group_layout(self):
+        """Test layout with multi-element groups."""
+        spec = {
+            "groups": [
+                {"name": "single"},
+                {
+                    "name": "multi",
+                    "elements": ["X", "Y", "Z"]
+                }
+            ],
+            "links": {
+                "single": "X"
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        levels, positions = generator._compute_layout_bottom_up()
+        
+        # Multi-element group should have position tuple
+        self.assertIn('multi', positions)
+        start_x, elements = positions['multi']
+        self.assertEqual(elements, ['X', 'Y', 'Z'])
+    
+    def test_complex_underline_scenario(self):
+        """Test complex scenario with multiple underlined groups."""
+        spec = {
+            "groups": [
+                {"name": "A"},
+                {
+                    "name": "B_group",
+                    "elements": ["B1", "B2"],
+                    "underline": True
+                },
+                {
+                    "name": "C_group",
+                    "elements": ["C1", "C2", "C3"],
+                    "underline": True
+                },
+                {"name": "D"}
+            ],
+            "links": {
+                "A": "B1",
+                "B_group": "C1",
+                "C_group": "D"
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        latex = generator.generate_latex()
+        
+        # Should have underlines
+        self.assertIn('\\draw[blue]', latex)
+        self.assertIn('.south west', latex)
+    
+    def test_diagram_with_simple_underlines(self):
+        """Test simple diagram with underlines."""
+        spec = {
+            "groups": [
+                {"name": "A"},
+                {
+                    "name": "B_group",
+                    "elements": ["B1", "B2"],
+                    "underline": True
+                },
+                {"name": "C"}
+            ],
+            "links": {
+                "A": "B1",
+                "B_group": "C"
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        latex = generator.generate_latex()
+        
+        # Should handle underline
+        self.assertIn('\\draw[blue]', latex)
+    
+    def test_circular_prevention(self):
+        """Test that circular dependencies are handled."""
+        spec = {
+            "groups": [
+                {"name": "A"},
+                {"name": "B"},
+                {"name": "C"}
+            ],
+            "links": {
+                "A": "B",
+                "B": "C",
+                "C": "A"  # Creates a cycle
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        # Should not crash - it will place groups somehow
+        latex = generator.generate_latex()
+        
+        self.assertIn('{A}', latex)
+        self.assertIn('{B}', latex)
+        self.assertIn('{C}', latex)
+    
+    def test_delegate_methods(self):
+        """Test that delegate methods work correctly."""
+        spec = {
+            "groups": [
+                {"name": "A"},
+                {"name": "B"}
+            ],
+            "links": {
+                "A": "B"
+            }
+        }
+        
+        generator = DiagramGenerator(spec)
+        
+        # Test _segments_intersect delegation
+        result = generator._segments_intersect(0, 0, 2, 2, 0, 2, 2, 0)
+        self.assertIsInstance(result, bool)
+        
+        # Test _line_intersects_box delegation
+        result = generator._line_intersects_box(0, 0, 5, 5, 2, 2, 3, 3)
+        self.assertIsInstance(result, bool)
+
+
 if __name__ == '__main__':
     unittest.main()

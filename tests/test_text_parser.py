@@ -182,5 +182,262 @@ A -> B
         self.assertEqual(len(spec['links']), 1)
 
 
+class TestTextParserEdgeCases(unittest.TestCase):
+    """Test edge cases and branch coverage for text parser."""
+    
+    def test_mixed_order_groups_and_links(self):
+        """Test when groups and links are mixed without section headers."""
+        text = """
+A
+B -> C
+C
+D -> E
+E
+"""
+        spec = parse_text_format(text)
+        
+        # Should correctly identify groups and links
+        self.assertEqual(len(spec['groups']), 3)  # A, C, E
+        self.assertEqual(len(spec['links']), 2)  # B->C, D->E
+    
+    def test_multi_element_group_without_underline(self):
+        """Test multi-element group without underline modifier."""
+        text = """
+[A B C]
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 1)
+        self.assertIn('elements', spec['groups'][0])
+        self.assertEqual(spec['groups'][0]['elements'], ['A', 'B', 'C'])
+        self.assertNotIn('underline', spec['groups'][0])
+    
+    def test_empty_input(self):
+        """Test parsing empty input."""
+        text = ""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 0)
+        self.assertEqual(len(spec['links']), 0)
+    
+    def test_only_comments(self):
+        """Test file with only comments."""
+        text = """
+# This is a comment
+# Another comment
+# Yet another comment
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 0)
+        self.assertEqual(len(spec['links']), 0)
+    
+    def test_complex_link_chain(self):
+        """Test complex link chain."""
+        text = """
+A
+B
+C
+D
+E
+
+A -> B -> C -> D -> E
+"""
+        spec = parse_text_format(text)
+        
+        # Should create 4 links in chain
+        self.assertEqual(len(spec['links']), 4)
+        self.assertEqual(spec['links']['A'], 'B')
+        self.assertEqual(spec['links']['B'], 'C')
+        self.assertEqual(spec['links']['C'], 'D')
+        self.assertEqual(spec['links']['D'], 'E')
+    
+    def test_multiple_multi_element_groups(self):
+        """Test multiple multi-element groups."""
+        text = """
+[A B] underline
+[C D]
+[E F G] underline
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 3)
+        self.assertTrue(spec['groups'][0].get('underline', False))
+        self.assertFalse(spec['groups'][1].get('underline', False))
+        self.assertTrue(spec['groups'][2].get('underline', False))
+    
+    def test_group_link_with_multiple_targets(self):
+        """Test link from multi-element group."""
+        text = """
+[A B C]
+D
+
+[A B C] -> D
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 2)
+        self.assertEqual(len(spec['links']), 1)
+        
+        # Multi-element group should have auto-generated name
+        group_name = spec['groups'][0]['name']
+        self.assertIn('group_', group_name)
+        self.assertEqual(spec['links'][group_name], 'D')
+    
+    def test_special_characters_in_elements(self):
+        """Test elements with special characters."""
+        text = """
+P1
+P2+P3
+[P4 + P5]
+
+P1 -> P2+P3
+"""
+        spec = parse_text_format(text)
+        
+        # Should handle special characters
+        self.assertGreater(len(spec['groups']), 0)
+        self.assertGreater(len(spec['links']), 0)
+    
+    def test_section_headers_case_insensitive(self):
+        """Test that section headers are case insensitive."""
+        text = """
+# GROUPS
+A
+
+# LINKS
+A -> B
+B
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 2)
+        self.assertEqual(len(spec['links']), 1)
+
+
+class TestTextParserNormalization(unittest.TestCase):
+    """Test element normalization and parsing."""
+    
+    def test_whitespace_handling(self):
+        """Test handling of extra whitespace."""
+        text = """
+   A   
+  B  
+
+  A   ->   B  
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 2)
+        self.assertEqual(spec['groups'][0]['name'], 'A')
+        self.assertEqual(spec['groups'][1]['name'], 'B')
+    
+    def test_multi_element_group_whitespace(self):
+        """Test multi-element group with extra whitespace."""
+        text = """
+[  A   B   C  ]
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 1)
+        self.assertEqual(spec['groups'][0]['elements'], ['A', 'B', 'C'])
+    
+    def test_comment_lines(self):
+        """Test that lines starting with # are treated as section headers."""
+        text = """
+A
+B
+"""
+        spec = parse_text_format(text)
+        
+        # Should parse A and B as groups
+        self.assertEqual(len(spec['groups']), 2)
+    
+    def test_empty_lines_ignored(self):
+        """Test that empty lines are properly handled."""
+        text = """
+A
+
+B
+
+
+C
+"""
+        spec = parse_text_format(text)
+        
+        self.assertEqual(len(spec['groups']), 3)
+    
+    def test_arrow_variations(self):
+        """Test different arrow syntaxes."""
+        text = """
+A
+B
+C
+A->B
+B->C
+"""
+        spec = parse_text_format(text)
+        
+        # Should recognize -> as arrows
+        self.assertEqual(len(spec['groups']), 3)
+        # Check that links were created
+        self.assertEqual(len(spec['links']), 2)
+        self.assertIn('A', spec['links'])
+        self.assertIn('B', spec['links'])
+    
+    def test_underline_flag_setting(self):
+        """Test that underline flag is set on group (line 140)."""
+        text = """
+# Groups
+[A B C] underline
+"""
+        spec = parse_text_format(text)
+        
+        # Should have one group with underline flag set
+        self.assertEqual(len(spec['groups']), 1)
+        self.assertTrue(spec['groups'][0].get('underline', False))
+        self.assertEqual(spec['groups'][0]['elements'], ['A', 'B', 'C'])
+    
+    def test_invalid_link_chain(self):
+        """Test parsing invalid link chains with less than 2 parts (line 200)."""
+        text = """
+# Groups
+A
+B
+
+# Links
+C
+"""
+        spec = parse_text_format(text)
+        
+        # "C" without "->" will be treated as a group first, but when parsing as link
+        # it will split into just ['C'] which is < 2 parts
+        # The parser should return early (line 200) and not add a link
+        self.assertIn('A', [g['name'] for g in spec['groups']])
+        self.assertIn('B', [g['name'] for g in spec['groups']])
+        # C might be added as a group or ignored as a link
+        # The key is that no link is created from the invalid line
+        # and the code doesn't crash
+        self.assertNotIn('C', spec['links'])
+    
+    def test_element_normalization_fallback(self):
+        """Test element normalization with empty brackets fallback (line 229)."""
+        text = """
+# Groups
+[]
+A
+B
+"""
+        spec = parse_text_format(text)
+        
+        # Empty bracket should be handled gracefully
+        # Should have at least the non-empty groups
+        self.assertGreaterEqual(len(spec['groups']), 2)
+        # Check that valid groups are present
+        group_names = [g['name'] for g in spec['groups']]
+        self.assertIn('A', group_names)
+        self.assertIn('B', group_names)
+
+
 if __name__ == '__main__':
     unittest.main()

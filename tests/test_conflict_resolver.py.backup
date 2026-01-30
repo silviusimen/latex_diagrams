@@ -1,0 +1,576 @@
+#!/usr/bin/env python3
+"""
+Comprehensive unit tests for conflict_resolver module.
+Tests all methods and branches for complete coverage.
+"""
+
+import unittest
+from unittest.mock import patch
+from latex_diagram_generator.conflict_resolver import ConflictResolver
+
+
+class TestConflictResolverInit(unittest.TestCase):
+    """Test ConflictResolver initialization."""
+    
+    def test_init_default_spacing(self):
+        """Test initialization with default spacing."""
+        resolver = ConflictResolver()
+        self.assertEqual(resolver.WITHIN_GROUP_SPACING, 2.0)
+    
+    def test_init_custom_spacing(self):
+        """Test initialization with custom spacing."""
+        resolver = ConflictResolver(within_group_spacing=3.5)
+        self.assertEqual(resolver.WITHIN_GROUP_SPACING, 3.5)
+
+
+class TestBuildPositionLookup(unittest.TestCase):
+    """Test _build_position_lookup method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_build_position_lookup_valid_data(self):
+        """Test building position lookup from valid node_positions."""
+        node_positions = {
+            'A': ('node_a', 0.0, 0),
+            'B': ('node_b', 2.0, 1),
+            'C': ('node_c', 4.0, 2)
+        }
+        
+        positions = self.resolver._build_position_lookup(node_positions)
+        
+        self.assertEqual(positions['A'], (0.0, 0))
+        self.assertEqual(positions['B'], (2.0, 1))
+        self.assertEqual(positions['C'], (4.0, 2))
+    
+    def test_build_position_lookup_invalid_tuples(self):
+        """Test with invalid tuple lengths (not 3 elements)."""
+        node_positions = {
+            'A': ('node_a', 0.0, 0),
+            'B': (2.0, 1),  # Only 2 elements
+            'C': 5.0  # Not a tuple
+        }
+        
+        positions = self.resolver._build_position_lookup(node_positions)
+        
+        # Only 'A' should be included
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions['A'], (0.0, 0))
+    
+    def test_build_position_lookup_empty(self):
+        """Test with empty node_positions."""
+        positions = self.resolver._build_position_lookup({})
+        self.assertEqual(positions, {})
+
+
+class TestBuildArrowList(unittest.TestCase):
+    """Test _build_arrow_list method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_build_arrow_list_single_targets(self):
+        """Test building arrow list with single targets."""
+        links = {'A': 'B', 'B': 'C'}
+        positions = {'A': (0, 0), 'B': (2, 1), 'C': (4, 2)}
+        
+        arrows = self.resolver._build_arrow_list(links, positions)
+        
+        self.assertEqual(len(arrows), 2)
+        self.assertIn(('A', 0, 0, 'B', 2, 1), arrows)
+        self.assertIn(('B', 2, 1, 'C', 4, 2), arrows)
+    
+    def test_build_arrow_list_multiple_targets(self):
+        """Test building arrow list with list of targets."""
+        links = {'A': ['B', 'C']}
+        positions = {'A': (0, 0), 'B': (2, 1), 'C': (4, 1)}
+        
+        arrows = self.resolver._build_arrow_list(links, positions)
+        
+        self.assertEqual(len(arrows), 2)
+        self.assertIn(('A', 0, 0, 'B', 2, 1), arrows)
+        self.assertIn(('A', 0, 0, 'C', 4, 1), arrows)
+    
+    def test_build_arrow_list_missing_positions(self):
+        """Test when source or target not in positions."""
+        links = {'A': 'B', 'C': 'D'}
+        positions = {'A': (0, 0), 'B': (2, 1)}  # C and D missing
+        
+        arrows = self.resolver._build_arrow_list(links, positions)
+        
+        # Only A->B should be included
+        self.assertEqual(len(arrows), 1)
+        self.assertEqual(arrows[0], ('A', 0, 0, 'B', 2, 1))
+
+
+class TestCheckTextOverlaps(unittest.TestCase):
+    """Test _check_text_overlaps method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_no_overlaps(self):
+        """Test with no overlapping text."""
+        positions = {
+            'A': (0, 0),
+            'B': (5, 0),
+            'C': (10, 0)
+        }
+        
+        overlaps = self.resolver._check_text_overlaps(positions)
+        self.assertEqual(len(overlaps), 0)
+    
+    def test_same_position_overlap(self):
+        """Test detection of exact same position."""
+        positions = {
+            'A': (0, 0),
+            'B': (0.05, 0.05)  # Within 0.1 tolerance
+        }
+        
+        overlaps = self.resolver._check_text_overlaps(positions)
+        self.assertEqual(len(overlaps), 1)
+        self.assertEqual(overlaps[0][:2], ('A', 0))
+    
+    def test_horizontal_overlap_same_level(self):
+        """Test detection of horizontal overlap on same level."""
+        positions = {
+            'A': (0, 0),
+            'B': (0.5, 0)  # < 0.64 (text_width) apart on same level
+        }
+        
+        overlaps = self.resolver._check_text_overlaps(positions)
+        self.assertEqual(len(overlaps), 1)
+    
+    def test_different_levels_no_overlap(self):
+        """Test that different y levels don't trigger horizontal overlap."""
+        positions = {
+            'A': (0, 0),
+            'B': (0.5, 1)  # Close horizontally but different level
+        }
+        
+        overlaps = self.resolver._check_text_overlaps(positions)
+        self.assertEqual(len(overlaps), 0)
+
+
+class TestCheckArrowCrossings(unittest.TestCase):
+    """Test _check_arrow_crossings method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_no_crossings(self):
+        """Test with parallel arrows that don't cross."""
+        arrows = [
+            ('A', 0, 0, 'B', 2, 0),
+            ('C', 0, 1, 'D', 2, 1)
+        ]
+        
+        crossings = self.resolver._check_arrow_crossings(arrows)
+        self.assertEqual(len(crossings), 0)
+    
+    def test_arrows_share_endpoint(self):
+        """Test that arrows sharing endpoints are skipped."""
+        arrows = [
+            ('A', 0, 0, 'B', 2, 1),
+            ('A', 0, 0, 'C', 2, 2)  # Same source
+        ]
+        
+        crossings = self.resolver._check_arrow_crossings(arrows)
+        self.assertEqual(len(crossings), 0)
+    
+    def test_crossing_arrows(self):
+        """Test detection of crossing arrows."""
+        arrows = [
+            ('A', 0, 0, 'B', 4, 4),
+            ('C', 0, 4, 'D', 4, 0)  # Crosses first arrow
+        ]
+        
+        crossings = self.resolver._check_arrow_crossings(arrows)
+        self.assertEqual(len(crossings), 1)
+        self.assertEqual(crossings[0][:4], ('A', 'B', 'C', 'D'))
+
+
+class TestCheckArrowThroughText(unittest.TestCase):
+    """Test _check_arrow_through_text method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_no_arrow_through_text(self):
+        """Test when arrows don't pass through any text."""
+        arrows = [('A', 0, 0, 'B', 4, 0)]
+        positions = {
+            'A': (0, 0),
+            'B': (4, 0),
+            'C': (2, 5)  # Far away
+        }
+        
+        conflicts = self.resolver._check_arrow_through_text(arrows, positions)
+        self.assertEqual(len(conflicts), 0)
+    
+    def test_arrow_through_text_detected(self):
+        """Test detection of arrow passing through text box."""
+        arrows = [('A', 0, 0, 'C', 4, 0)]
+        positions = {
+            'A': (0, 0),
+            'B': (2, 0),  # B is between A and C on same level
+            'C': (4, 0)
+        }
+        
+        conflicts = self.resolver._check_arrow_through_text(arrows, positions)
+        # Should detect B as being in the path
+        self.assertGreater(len(conflicts), 0)
+    
+    def test_skip_source_and_target(self):
+        """Test that source and target nodes are skipped."""
+        arrows = [('A', 0, 0, 'B', 4, 0)]
+        positions = {
+            'A': (0, 0),
+            'B': (4, 0)
+        }
+        
+        conflicts = self.resolver._check_arrow_through_text(arrows, positions)
+        # A and B should be skipped
+        self.assertEqual(len(conflicts), 0)
+
+
+class TestSegmentsIntersect(unittest.TestCase):
+    """Test _segments_intersect method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_intersecting_segments(self):
+        """Test detection of intersecting line segments."""
+        # X pattern
+        result = self.resolver._segments_intersect(0, 0, 4, 4, 0, 4, 4, 0)
+        self.assertTrue(result)
+    
+    def test_non_intersecting_segments(self):
+        """Test parallel non-intersecting segments."""
+        result = self.resolver._segments_intersect(0, 0, 2, 0, 0, 1, 2, 1)
+        self.assertFalse(result)
+    
+    def test_segments_same_line(self):
+        """Test segments on same line."""
+        result = self.resolver._segments_intersect(0, 0, 2, 0, 3, 0, 5, 0)
+        self.assertFalse(result)
+
+
+class TestLineIntersectsBox(unittest.TestCase):
+    """Test _line_intersects_box method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_line_start_inside_box(self):
+        """Test when line start point is inside box."""
+        result = self.resolver._line_intersects_box(
+            1, 1, 5, 5,  # Line
+            0, 0, 2, 2   # Box
+        )
+        self.assertTrue(result)
+    
+    def test_line_end_inside_box(self):
+        """Test when line end point is inside box."""
+        result = self.resolver._line_intersects_box(
+            -1, -1, 1, 1,  # Line
+            0, 0, 2, 2     # Box
+        )
+        self.assertTrue(result)
+    
+    def test_line_passes_through_box(self):
+        """Test when line passes through box."""
+        result = self.resolver._line_intersects_box(
+            0, 0.5, 3, 0.5,  # Horizontal line through box
+            1, 0, 2, 1       # Box
+        )
+        self.assertTrue(result)
+    
+    def test_line_misses_box(self):
+        """Test when line doesn't intersect box."""
+        result = self.resolver._line_intersects_box(
+            0, 0, 1, 0,  # Line
+            2, 2, 3, 3   # Box far away
+        )
+        self.assertFalse(result)
+
+
+class TestCheckArrowIntersections(unittest.TestCase):
+    """Test check_arrow_intersections method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_return_conflicts_true(self):
+        """Test with return_conflicts=True."""
+        node_positions = {
+            'A': ('node_a', 0, 0),
+            'B': ('node_b', 2, 0)
+        }
+        links = {'A': 'B'}
+        
+        result = self.resolver.check_arrow_intersections(
+            node_positions, links, return_conflicts=True
+        )
+        
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        text_overlaps, arrow_crossings, arrow_through_text = result
+        self.assertIsInstance(text_overlaps, list)
+    
+    @patch('builtins.print')
+    def test_return_conflicts_false_with_conflicts(self, mock_print):
+        """Test with return_conflicts=False and conflicts present."""
+        node_positions = {
+            'A': ('node_a', 0, 0),
+            'B': ('node_b', 0.1, 0)  # Overlapping position
+        }
+        links = {}
+        
+        result = self.resolver.check_arrow_intersections(
+            node_positions, links, return_conflicts=False
+        )
+        
+        self.assertIsNone(result)
+        # Should have printed warning
+        mock_print.assert_called()
+    
+    def test_no_conflicts(self):
+        """Test when no conflicts exist."""
+        node_positions = {
+            'A': ('node_a', 0, 0),
+            'B': ('node_b', 5, 0)
+        }
+        links = {'A': 'B'}
+        
+        result = self.resolver.check_arrow_intersections(
+            node_positions, links, return_conflicts=True
+        )
+        
+        text_overlaps, arrow_crossings, arrow_through_text = result
+        self.assertEqual(len(text_overlaps), 0)
+        self.assertEqual(len(arrow_crossings), 0)
+
+
+class TestShiftGroupHorizontally(unittest.TestCase):
+    """Test _shift_group_horizontally method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_shift_single_element_group(self):
+        """Test shifting a single element group."""
+        positions = {'G1': (5.0, ['A'])}
+        node_positions = {'A': ('node_a', 5.0, 0)}
+        
+        self.resolver._shift_group_horizontally(
+            'G1', 2.0, positions, node_positions
+        )
+        
+        self.assertEqual(positions['G1'], (7.0, ['A']))
+        self.assertEqual(node_positions['A'], ('node_a', 7.0, 0))
+    
+    def test_shift_multi_element_group(self):
+        """Test shifting a multi-element group."""
+        positions = {'G1': (5.0, ['A', 'B', 'C'])}
+        node_positions = {
+            'A': ('node_a', 5.0, 0),
+            'B': ('node_b', 7.0, 0),
+            'C': ('node_c', 9.0, 0)
+        }
+        
+        self.resolver._shift_group_horizontally(
+            'G1', 1.0, positions, node_positions
+        )
+        
+        self.assertEqual(positions['G1'], (6.0, ['A', 'B', 'C']))
+        self.assertEqual(node_positions['A'], ('node_a', 6.0, 0))
+        self.assertEqual(node_positions['B'], ('node_b', 8.0, 0))
+        self.assertEqual(node_positions['C'], ('node_c', 10.0, 0))
+
+
+class TestResolveConflicts(unittest.TestCase):
+    """Test conflict resolution methods."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_resolve_text_overlaps(self):
+        """Test text overlap resolution."""
+        text_overlaps = [('A', 0, 0, 'B', 0.5, 0)]
+        positions = {'G1': (0, ['A']), 'G2': (0.5, ['B'])}
+        node_positions = {'A': ('node_a', 0, 0), 'B': ('node_b', 0.5, 0)}
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A']},
+            'G2': {'name': 'G2', 'elements': ['B']}
+        }
+        
+        result = self.resolver._resolve_text_overlaps(
+            text_overlaps, positions, node_positions, group_name_to_group
+        )
+        
+        # Should have tried to resolve and return boolean
+        self.assertIsInstance(result, bool)
+    
+    def test_resolve_arrow_crossings(self):
+        """Test arrow crossing resolution."""
+        arrow_crossings = [('A', 'B', 'C', 'D', 2, 2)]
+        positions = {'G1': (0, ['A']), 'G2': (4, ['B'])}
+        node_positions = {'A': ('node_a', 0, 0), 'B': ('node_b', 4, 4)}
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A']},
+            'G2': {'name': 'G2', 'elements': ['B']},
+            'G3': {'name': 'G3', 'elements': ['C']},
+            'G4': {'name': 'G4', 'elements': ['D']}
+        }
+        
+        result = self.resolver._resolve_arrow_crossings(
+            arrow_crossings, positions, node_positions, group_name_to_group
+        )
+        
+        self.assertIsInstance(result, bool)
+
+
+class TestResolveConflictsIteratively(unittest.TestCase):
+    """Test resolve_conflicts_iteratively method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    @patch('builtins.print')
+    def test_no_conflicts(self, mock_print):
+        """Test when there are no conflicts."""
+        node_positions = {'A': (0, 0), 'B': (5, 0)}
+        levels = {'G1': 0, 'G2': 0}
+        positions = {'G1': (0, ['A']), 'G2': (5, ['B'])}
+        element_to_group = {'A': 'G1', 'B': 'G2'}
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A']},
+            'G2': {'name': 'G2', 'elements': ['B']}
+        }
+        links = {}
+        
+        self.resolver.resolve_conflicts_iteratively(
+            node_positions, levels, positions, element_to_group,
+            group_name_to_group, links
+        )
+        
+        # Should print success message
+        self.assertTrue(any('All conflicts resolved' in str(call) 
+                          for call in mock_print.call_args_list))
+    
+    @patch('builtins.print')
+    def test_with_conflicts(self, mock_print):
+        """Test when conflicts exist and need resolution."""
+        node_positions = {'A': (0, 0), 'B': (0.3, 0)}  # Overlapping
+        levels = {'G1': 0, 'G2': 0}
+        positions = {'G1': (0, ['A']), 'G2': (0.3, ['B'])}
+        element_to_group = {'A': 'G1', 'B': 'G2'}
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A']},
+            'G2': {'name': 'G2', 'elements': ['B']}
+        }
+        links = {}
+        
+        self.resolver.resolve_conflicts_iteratively(
+            node_positions, levels, positions, element_to_group,
+            group_name_to_group, links, max_iterations=5
+        )
+        
+        # Should have attempted resolution
+        mock_print.assert_called()
+
+
+class TestFindGroupForElement(unittest.TestCase):
+    """Test _find_group_for_element method."""
+    
+    def setUp(self):
+        self.resolver = ConflictResolver()
+    
+    def test_find_group_for_element_found(self):
+        """Test finding group for existing element."""
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A', 'B']},
+            'G2': {'name': 'G2', 'elements': ['C']}
+        }
+        
+        result = self.resolver._find_group_for_element('B', group_name_to_group)
+        self.assertEqual(result, 'G1')
+    
+    def test_find_group_for_element_not_found(self):
+        """Test when element not in any group."""
+        group_name_to_group = {
+            'G1': {'name': 'G1', 'elements': ['A']},
+        }
+        
+        result = self.resolver._find_group_for_element('Z', group_name_to_group)
+        self.assertIsNone(result)
+    
+    def test_find_group_for_element_no_elements_key(self):
+        """Test when group doesn't have 'elements' key."""
+        group_name_to_group = {
+            'G1': {'name': 'G1'},  # No 'elements' key
+        }
+        
+        result = self.resolver._find_group_for_element('A', group_name_to_group)
+        self.assertIsNone(result)
+    
+    def test_resolve_text_overlaps_horizontal_same_level(self):
+        """Test resolving horizontal text overlaps on same level."""
+        positions = {
+            'G1': (0.0, ['A']),
+            'G2': (1.0, ['B'])  # Too close
+        }
+        node_positions = {
+            'A': ('a', 0.0, 5),
+            'B': ('b', 1.0, 5)  # Same level, overlapping
+        }
+        incoming = {}
+        group_name_to_group = {
+            'G1': {'elements': ['A']},
+            'G2': {'elements': ['B']}
+        }
+        
+        result = self.resolver._resolve_text_overlaps(
+            [('A', 0.0, 5, 'B', 1.0, 5)],
+            positions, node_positions, group_name_to_group
+        )
+        
+        self.assertTrue(result)
+    
+    def test_resolve_arrow_crossings_with_shift(self):
+        """Test resolving arrow crossings by shifting groups."""
+        positions = {
+            'G1': (0.0, ['A']),
+            'G2': (2.0, ['B']),
+            'G3': (1.0, ['C']),
+            'G4': (3.0, ['D'])
+        }
+        node_positions = {
+            'A': ('a', 0.0, 0),
+            'B': ('b', 2.0, 1),
+            'C': ('c', 1.0, 1),
+            'D': ('d', 3.0, 0)
+        }
+        incoming = {'C': ['A'], 'D': ['B']}
+        group_name_to_group = {
+            'G1': {'elements': ['A']},
+            'G2': {'elements': ['B']},
+            'G3': {'elements': ['C']},
+            'G4': {'elements': ['D']}
+        }
+        
+        # Arrows A->C and B->D might cross
+        arrow_crossings = [('A', 'C', 'B', 'D', 1.5, 0.5)]
+        
+        result = self.resolver._resolve_arrow_crossings(
+            arrow_crossings, positions, node_positions, group_name_to_group
+        )
+        
+        # Result should be boolean
+        self.assertIsInstance(result, bool)
+
+
+if __name__ == '__main__':
+    unittest.main()

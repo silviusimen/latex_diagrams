@@ -11,6 +11,7 @@ from collections import defaultdict
 from .conflict_resolver import ConflictResolver
 from .layout_engine import LayoutEngine
 from .latex_generator import LaTeXGenerator
+from .geometric_helper import GeometricHelper
 
 
 class DiagramGenerator:
@@ -83,12 +84,12 @@ class DiagramGenerator:
         )
     
     def _segments_intersect(self, x1, y1, x2, y2, x3, y3, x4, y4):
-        """Delegate to ConflictResolver."""
-        return self.conflict_resolver._segments_intersect(x1, y1, x2, y2, x3, y3, x4, y4)
+        """Delegate to GeometricHelper."""
+        return GeometricHelper.segments_intersect(x1, y1, x2, y2, x3, y3, x4, y4)
     
     def _line_intersects_box(self, x1, y1, x2, y2, box_min_x, box_min_y, box_max_x, box_max_y):
-        """Delegate to ConflictResolver."""
-        return self.conflict_resolver._line_intersects_box(
+        """Delegate to GeometricHelper."""
+        return GeometricHelper.line_intersects_box(
             x1, y1, x2, y2, box_min_x, box_min_y, box_max_x, box_max_y
         )
     

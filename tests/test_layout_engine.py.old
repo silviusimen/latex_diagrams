@@ -1,0 +1,839 @@
+#!/usr/bin/env python3
+"""Unit tests for Layout Engine."""
+
+import unittest
+from latex_diagram_generator.layout_engine import LayoutEngine
+
+
+class TestLayoutEngine(unittest.TestCase):
+    """Tests for LayoutEngine class."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.engine = LayoutEngine(within_group_spacing=2.0)
+        
+        # Basic test data structures
+        self.group_name_to_group = {
+            'Group1': {'elements': ['A', 'B']},
+            'Group2': {'elements': ['C']},
+            'Group3': {'elements': ['D', 'E', 'F']}
+        }
+        self.element_to_group = {
+            'A': 'Group1', 'B': 'Group1',
+            'C': 'Group2',
+            'D': 'Group3', 'E': 'Group3', 'F': 'Group3'
+        }
+        
+        # Initialize engine for tests that need it
+        self.engine.group_name_to_group = self.group_name_to_group
+        self.engine.element_to_group = self.element_to_group
+    
+    # Tests for __init__
+    def test_init_sets_default_spacing(self):
+        """Test that init sets default spacing."""
+        engine = LayoutEngine()
+        self.assertEqual(engine.WITHIN_GROUP_SPACING, 2.0)
+    
+    def test_init_sets_custom_spacing(self):
+        """Test that init accepts custom spacing."""
+        engine = LayoutEngine(within_group_spacing=3.5)
+        self.assertEqual(engine.WITHIN_GROUP_SPACING, 3.5)
+    
+    def test_init_sets_none_attributes(self):
+        """Test that init sets group mappings to None."""
+        engine = LayoutEngine()
+        self.assertIsNone(engine.group_name_to_group)
+        self.assertIsNone(engine.element_to_group)
+    
+    # Tests for _has_outgoing_to_other_group
+    def test_has_outgoing_to_other_group_with_outgoing(self):
+        """Test detecting outgoing links to other groups."""
+        outgoing = {'A': 'C'}  # A in Group1 -> C in Group2
+        result = self.engine._has_outgoing_to_other_group('Group1', outgoing)
+        self.assertTrue(result)
+    
+    def test_has_outgoing_to_other_group_without_outgoing(self):
+        """Test detecting no outgoing links."""
+        outgoing = {}
+        result = self.engine._has_outgoing_to_other_group('Group1', outgoing)
+        self.assertFalse(result)
+    
+    def test_has_outgoing_to_other_group_same_group(self):
+        """Test that links within same group return False."""
+        outgoing = {'A': 'B'}  # Both in Group1
+        result = self.engine._has_outgoing_to_other_group('Group1', outgoing)
+        self.assertFalse(result)
+    
+    def test_has_outgoing_to_other_group_list_target(self):
+        """Test with target as list."""
+        outgoing = {'A': ['C', 'D']}
+        result = self.engine._has_outgoing_to_other_group('Group1', outgoing)
+        self.assertTrue(result)
+    
+    def test_has_outgoing_to_other_group_from_group_name(self):
+        """Test with link from group name directly."""
+        # The actual implementation checks 'elements' first, not 'name'
+        # So a group without elements won't trigger the group-level check
+        group_name_to_group = {
+            'Group1': {},  # No elements - triggers group name check
+            'Group2': {'elements': ['B']}
+        }
+        element_to_group = {'B': 'Group2'}
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = element_to_group
+        
+        outgoing = {'Group1': 'B'}
+        result = self.engine._has_outgoing_to_other_group('Group1', outgoing)
+        self.assertTrue(result)
+    
+    # Tests for _find_bottom_groups
+    def test_find_bottom_groups_with_one_bottom(self):
+        """Test finding bottom groups when one exists."""
+        all_groups = {'Group1', 'Group2'}
+        outgoing = {'A': 'C'}  # Group1 -> Group2
+        
+        result = self.engine._find_bottom_groups(all_groups, outgoing)
+        
+        self.assertEqual(result, ['Group2'])
+    
+    def test_find_bottom_groups_with_multiple(self):
+        """Test finding multiple bottom groups."""
+        all_groups = {'Group1', 'Group2', 'Group3'}
+        outgoing = {'A': 'D'}  # Only Group1 has outgoing
+        
+        result = self.engine._find_bottom_groups(all_groups, outgoing)
+        
+        self.assertIn('Group2', result)
+        self.assertIn('Group3', result)
+        self.assertEqual(len(result), 2)
+    
+    def test_find_bottom_groups_all_bottom(self):
+        """Test when all groups are bottom groups."""
+        all_groups = {'Group1', 'Group2'}
+        outgoing = {}
+        
+        result = self.engine._find_bottom_groups(all_groups, outgoing)
+        
+        self.assertEqual(len(result), 2)
+    
+    # Tests for _get_group_target
+    def test_get_group_target_with_element_link(self):
+        """Test getting target group from element link."""
+        outgoing = {'A': 'C'}
+        result = self.engine._get_group_target('Group1', outgoing)
+        self.assertEqual(result, 'Group2')
+    
+    def test_get_group_target_no_link(self):
+        """Test getting None when no target exists."""
+        outgoing = {}
+        result = self.engine._get_group_target('Group1', outgoing)
+        self.assertIsNone(result)
+    
+    def test_get_group_target_with_list(self):
+        """Test getting target when outgoing is a list."""
+        outgoing = {'A': ['C', 'D']}
+        result = self.engine._get_group_target('Group1', outgoing)
+        self.assertEqual(result, 'Group2')
+    
+    def test_get_group_target_from_group_name(self):
+        """Test getting target from group name link."""
+        group_name_to_group = {
+            'Group1': {'name': 'Group1'},
+            'Group2': {'elements': ['B']}
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = {'B': 'Group2'}
+        
+        outgoing = {'Group1': 'B'}
+        result = self.engine._get_group_target('Group1', outgoing)
+        self.assertEqual(result, 'Group2')
+    
+    # Tests for _group_links_to_placed
+    def test_group_links_to_placed_true(self):
+        """Test when group links to placed group."""
+        placed_groups = {'Group2'}
+        outgoing = {'A': 'C'}
+        
+        result = self.engine._group_links_to_placed('Group1', placed_groups, outgoing)
+        
+        self.assertTrue(result)
+    
+    def test_group_links_to_placed_false(self):
+        """Test when group doesn't link to placed groups."""
+        placed_groups = {'Group3'}
+        outgoing = {'A': 'C'}  # Links to Group2, not Group3
+        
+        result = self.engine._group_links_to_placed('Group1', placed_groups, outgoing)
+        
+        self.assertFalse(result)
+    
+    def test_group_links_to_placed_no_target(self):
+        """Test when group has no target."""
+        placed_groups = {'Group2'}
+        outgoing = {}
+        
+        result = self.engine._group_links_to_placed('Group1', placed_groups, outgoing)
+        
+        self.assertFalse(result)
+    
+    # Tests for _find_next_layer_groups
+    def test_find_next_layer_groups_one_group(self):
+        """Test finding next layer with one group."""
+        all_groups = {'Group1', 'Group2'}
+        placed_groups = {'Group2'}
+        outgoing = {'A': 'C'}
+        
+        result = self.engine._find_next_layer_groups(all_groups, placed_groups, outgoing)
+        
+        self.assertEqual(result, ['Group1'])
+    
+    def test_find_next_layer_groups_no_groups(self):
+        """Test when no groups link to placed."""
+        all_groups = {'Group1', 'Group2'}
+        placed_groups = {'Group3'}
+        outgoing = {}
+        
+        result = self.engine._find_next_layer_groups(all_groups, placed_groups, outgoing)
+        
+        self.assertEqual(result, [])
+    
+    def test_find_next_layer_groups_multiple(self):
+        """Test finding multiple next layer groups."""
+        group_name_to_group = {
+            'Group1': {'elements': ['A']},
+            'Group2': {'elements': ['B']},
+            'Group3': {'elements': ['C']}
+        }
+        element_to_group = {'A': 'Group1', 'B': 'Group2', 'C': 'Group3'}
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = element_to_group
+        
+        all_groups = {'Group1', 'Group2', 'Group3'}
+        placed_groups = {'Group3'}
+        outgoing = {'A': 'C', 'B': 'C'}
+        
+        result = self.engine._find_next_layer_groups(all_groups, placed_groups, outgoing)
+        
+        self.assertEqual(len(result), 2)
+        self.assertIn('Group1', result)
+        self.assertIn('Group2', result)
+    
+    # Tests for _get_group_destination_x
+    def test_get_group_destination_x_with_position(self):
+        """Test getting destination x when target has position."""
+        outgoing = {'A': 'C'}
+        node_positions = {'C': 5.0}
+        
+        result = self.engine._get_group_destination_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 5.0)
+    
+    def test_get_group_destination_x_no_position(self):
+        """Test getting default when no position found."""
+        outgoing = {'A': 'C'}
+        node_positions = {}
+        
+        result = self.engine._get_group_destination_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 999)
+    
+    def test_get_group_destination_x_no_outgoing(self):
+        """Test getting default when no outgoing links."""
+        outgoing = {}
+        node_positions = {}
+        
+        result = self.engine._get_group_destination_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 999)
+    
+    def test_get_group_destination_x_from_group_name(self):
+        """Test getting destination from group name link."""
+        group_name_to_group = {
+            'Group1': {'name': 'Group1'},
+            'Group2': {'elements': ['B']}
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = {'B': 'Group2'}
+        
+        outgoing = {'Group1': 'B'}
+        node_positions = {'B': 7.5}
+        
+        result = self.engine._get_group_destination_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 7.5)
+    
+    # Tests for _sort_groups_by_destination
+    def test_sort_groups_by_destination_basic(self):
+        """Test sorting groups by destination."""
+        groups = ['Group1', 'Group2']
+        outgoing = {'A': 'X', 'C': 'Y'}
+        node_positions = {'X': 10.0, 'Y': 5.0}
+        
+        # Mock the element_to_group for X and Y
+        self.engine.element_to_group.update({'X': 'GroupX', 'Y': 'GroupY'})
+        
+        result = self.engine._sort_groups_by_destination(groups, outgoing, node_positions)
+        
+        # Group2 (dest 5.0) should come before Group1 (dest 10.0)
+        self.assertEqual(result[0], 'Group2')
+        self.assertEqual(result[1], 'Group1')
+    
+    def test_sort_groups_by_destination_alphabetical_tie(self):
+        """Test alphabetical sorting when destinations match."""
+        group_name_to_group = {
+            'GroupB': {'elements': ['X']},
+            'GroupA': {'elements': ['Y']}
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = {'X': 'GroupB', 'Y': 'GroupA'}
+        
+        groups = ['GroupB', 'GroupA']
+        outgoing = {}
+        node_positions = {}
+        
+        result = self.engine._sort_groups_by_destination(groups, outgoing, node_positions)
+        
+        # Both have dest 999, should be sorted alphabetically
+        self.assertEqual(result[0], 'GroupA')
+        self.assertEqual(result[1], 'GroupB')
+    
+    # Tests for _initialize_layout
+    def test_initialize_layout_returns_correct_structure(self):
+        """Test that initialize_layout returns correct data structures."""
+        result = self.engine._initialize_layout(
+            self.group_name_to_group,
+            self.element_to_group
+        )
+        
+        all_groups, levels, positions, node_positions, placed_groups, current_y = result
+        
+        self.assertEqual(all_groups, set(self.group_name_to_group.keys()))
+        self.assertEqual(levels, {})
+        self.assertEqual(positions, {})
+        self.assertEqual(node_positions, {})
+        self.assertEqual(placed_groups, set())
+        self.assertEqual(current_y, 0)
+    
+    def test_initialize_layout_sets_engine_attributes(self):
+        """Test that initialize_layout sets engine attributes."""
+        engine = LayoutEngine()
+        
+        engine._initialize_layout(
+            self.group_name_to_group,
+            self.element_to_group
+        )
+        
+        self.assertEqual(engine.group_name_to_group, self.group_name_to_group)
+        self.assertEqual(engine.element_to_group, self.element_to_group)
+    
+    # Tests for _get_target_from_list
+    def test_get_target_from_list_with_list(self):
+        """Test extracting target from list."""
+        result = self.engine._get_target_from_list(['A', 'B', 'C'])
+        self.assertEqual(result, 'A')
+    
+    def test_get_target_from_list_with_single_value(self):
+        """Test extracting target when not a list."""
+        result = self.engine._get_target_from_list('A')
+        self.assertEqual(result, 'A')
+    
+    # Tests for _find_group_target_in_set
+    def test_find_group_target_in_set_found(self):
+        """Test finding target in set."""
+        group_name_to_group = {
+            'Group1': {'name': 'Group1', 'elements': ['A']},
+            'Group2': {'elements': ['B']}
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = {'A': 'Group1', 'B': 'Group2'}
+        
+        outgoing = {'A': 'B'}
+        result = self.engine._find_group_target_in_set('Group1', ['Group2'], outgoing)
+        
+        self.assertEqual(result, 'Group2')
+    
+    def test_find_group_target_in_set_not_in_set(self):
+        """Test when target not in specified set."""
+        outgoing = {'A': 'C'}
+        result = self.engine._find_group_target_in_set('Group1', ['Group3'], outgoing)
+        
+        self.assertIsNone(result)
+    
+    def test_find_group_target_in_set_no_outgoing(self):
+        """Test when group has no outgoing links."""
+        outgoing = {}
+        result = self.engine._find_group_target_in_set('Group1', ['Group2'], outgoing)
+        
+        self.assertIsNone(result)
+    
+    # Tests for _find_bottom_group_dependencies
+    def test_find_bottom_group_dependencies_with_deps(self):
+        """Test finding dependencies among bottom groups."""
+        outgoing = {'A': 'C'}
+        result = self.engine._find_bottom_group_dependencies(['Group1', 'Group2'], outgoing)
+        
+        self.assertEqual(result, {'Group1': 'Group2'})
+    
+    def test_find_bottom_group_dependencies_no_deps(self):
+        """Test when no dependencies exist."""
+        outgoing = {}
+        result = self.engine._find_bottom_group_dependencies(['Group1', 'Group2'], outgoing)
+        
+        self.assertEqual(result, {})
+    
+    # Tests for _calculate_group_widths
+    def test_calculate_group_widths_single_element(self):
+        """Test width calculation for single element groups."""
+        group_name_to_group = {'Group1': {'elements': ['A']}}
+        self.engine.group_name_to_group = group_name_to_group
+        
+        result = self.engine._calculate_group_widths(['Group1'])
+        
+        self.assertEqual(result, [0.0])
+    
+    def test_calculate_group_widths_multiple_elements(self):
+        """Test width calculation for multi-element groups."""
+        result = self.engine._calculate_group_widths(['Group3'])
+        
+        # 3 elements: (3-1) * 2.0 = 4.0
+        self.assertEqual(result, [4.0])
+    
+    def test_calculate_group_widths_mixed(self):
+        """Test width calculation for mixed groups."""
+        result = self.engine._calculate_group_widths(['Group1', 'Group2', 'Group3'])
+        
+        # Group1: 2 elements = 2.0, Group2: 1 element = 0.0, Group3: 3 elements = 4.0
+        self.assertEqual(result, [2.0, 0.0, 4.0])
+    
+    def test_calculate_group_widths_no_elements_key(self):
+        """Test width for group without elements key."""
+        group_name_to_group = {'Group1': {}}
+        self.engine.group_name_to_group = group_name_to_group
+        
+        result = self.engine._calculate_group_widths(['Group1'])
+        
+        self.assertEqual(result, [0.0])
+    
+    # Tests for _calculate_starting_x
+    def test_calculate_starting_x_centered(self):
+        """Test calculating centered starting position."""
+        group_names = ['Group1']
+        group_widths = [4.0]
+        
+        result = self.engine._calculate_starting_x(group_names, group_widths, center=True)
+        
+        # total_width = 4.0, centered at 6.0: start = 6.0 - 4.0/2 = 4.0
+        self.assertEqual(result, 4.0)
+    
+    def test_calculate_starting_x_not_centered(self):
+        """Test calculating non-centered starting position."""
+        result = self.engine._calculate_starting_x([], [], center=False)
+        
+        self.assertEqual(result, 0.0)
+    
+    def test_calculate_starting_x_multiple_groups(self):
+        """Test starting x with multiple groups."""
+        group_names = ['G1', 'G2']
+        group_widths = [2.0, 4.0]
+        
+        result = self.engine._calculate_starting_x(group_names, group_widths, center=True)
+        
+        # total = 2.0 + 4.0 + 2.0 (spacing) = 8.0, start = 6.0 - 4.0 = 2.0
+        self.assertEqual(result, 2.0)
+    
+    # Tests for _place_group_at_position
+    def test_place_group_at_position_basic(self):
+        """Test placing a group at position."""
+        levels = {}
+        positions = {}
+        node_positions = {}
+        
+        result = self.engine._place_group_at_position(
+            'Group1', 2.0, 0.0, 5, levels, positions, node_positions
+        )
+        
+        self.assertEqual(levels['Group1'], 5)
+        self.assertEqual(positions['Group1'], (0.0, ['A', 'B']))
+        self.assertEqual(node_positions['A'], 0.0)
+        self.assertEqual(node_positions['B'], 2.0)
+        self.assertEqual(result, 4.0)  # 0.0 + 2.0 + 2.0
+    
+    def test_place_group_at_position_single_element(self):
+        """Test placing single element group."""
+        group_name_to_group = {'G': {'elements': ['X']}}
+        self.engine.group_name_to_group = group_name_to_group
+        
+        levels = {}
+        positions = {}
+        node_positions = {}
+        
+        result = self.engine._place_group_at_position(
+            'G', 0.0, 5.0, 3, levels, positions, node_positions
+        )
+        
+        self.assertEqual(node_positions['X'], 5.0)
+        self.assertEqual(result, 7.0)  # 5.0 + 0.0 + 2.0
+    
+    # Tests for _group_has_incoming
+    def test_group_has_incoming_true(self):
+        """Test detecting incoming links."""
+        incoming = {'A': ['X']}
+        result = self.engine._group_has_incoming('Group1', incoming)
+        self.assertTrue(result)
+    
+    def test_group_has_incoming_false(self):
+        """Test detecting no incoming links."""
+        incoming = {}
+        result = self.engine._group_has_incoming('Group1', incoming)
+        self.assertFalse(result)
+    
+    def test_group_has_incoming_group_level(self):
+        """Test incoming at group level."""
+        group_name_to_group = {'Group1': {'name': 'Group1'}}
+        self.engine.group_name_to_group = group_name_to_group
+        
+        incoming = {'Group1': ['X']}
+        result = self.engine._group_has_incoming('Group1', incoming)
+        self.assertTrue(result)
+    
+    # Tests for _classify_groups_by_incoming
+    def test_classify_groups_by_incoming_mixed(self):
+        """Test classifying groups by incoming links."""
+        incoming = {'A': ['X']}  # Group1 has incoming
+        
+        with_inc, without_inc = self.engine._classify_groups_by_incoming(
+            ['Group1', 'Group2'], incoming
+        )
+        
+        self.assertIn('Group1', with_inc)
+        self.assertIn('Group2', without_inc)
+    
+    def test_classify_groups_by_incoming_all_with(self):
+        """Test when all groups have incoming."""
+        incoming = {'A': ['X'], 'C': ['Y']}
+        
+        with_inc, without_inc = self.engine._classify_groups_by_incoming(
+            ['Group1', 'Group2'], incoming
+        )
+        
+        self.assertEqual(len(with_inc), 2)
+        self.assertEqual(len(without_inc), 0)
+    
+    def test_classify_groups_by_incoming_all_without(self):
+        """Test when no groups have incoming."""
+        incoming = {}
+        
+        with_inc, without_inc = self.engine._classify_groups_by_incoming(
+            ['Group1', 'Group2'], incoming
+        )
+        
+        self.assertEqual(len(with_inc), 0)
+        self.assertEqual(len(without_inc), 2)
+    
+    # Tests for calculate_row_width
+    def test_calculate_row_width_empty(self):
+        """Test row width for empty group list."""
+        result = self.engine.calculate_row_width([])
+        self.assertEqual(result, 0.0)
+    
+    def test_calculate_row_width_single_group(self):
+        """Test row width for single group."""
+        result = self.engine.calculate_row_width(['Group1'])
+        # Group1 has 2 elements: width = 2.0, no inter-group spacing
+        self.assertEqual(result, 2.0)
+    
+    def test_calculate_row_width_multiple_groups(self):
+        """Test row width for multiple groups."""
+        result = self.engine.calculate_row_width(['Group1', 'Group2', 'Group3'])
+        # Group1: 2.0, Group2: 0.0, Group3: 4.0, spacing: 2*2.0 = 4.0
+        # Total: 2.0 + 0.0 + 4.0 + 4.0 = 10.0
+        self.assertEqual(result, 10.0)
+    
+    # Tests for _get_group_target_x
+    def test_get_group_target_x_with_position(self):
+        """Test getting target x position."""
+        outgoing = {'A': 'X'}
+        node_positions = {'X': 8.5}
+        
+        result = self.engine._get_group_target_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 8.5)
+    
+    def test_get_group_target_x_default(self):
+        """Test getting default center position."""
+        outgoing = {}
+        node_positions = {}
+        
+        result = self.engine._get_group_target_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 6.0)
+    
+    def test_get_group_target_x_no_position(self):
+        """Test when target exists but has no position."""
+        outgoing = {'A': 'X'}
+        node_positions = {}
+        
+        result = self.engine._get_group_target_x('Group1', outgoing, node_positions)
+        
+        self.assertEqual(result, 6.0)
+    
+    # Tests for _calculate_group_width
+    def test_calculate_group_width_single(self):
+        """Test width of single element."""
+        result = self.engine._calculate_group_width(['A'])
+        self.assertEqual(result, 0.0)
+    
+    def test_calculate_group_width_multiple(self):
+        """Test width of multiple elements."""
+        result = self.engine._calculate_group_width(['A', 'B', 'C'])
+        # (3-1) * 2.0 = 4.0
+        self.assertEqual(result, 4.0)
+    
+    def test_calculate_group_width_two_elements(self):
+        """Test width of two elements."""
+        result = self.engine._calculate_group_width(['A', 'B'])
+        # (2-1) * 2.0 = 2.0
+        self.assertEqual(result, 2.0)
+    
+    # Tests for _adjust_position_for_collisions
+    def test_adjust_position_no_collision(self):
+        """Test position adjustment when no collision."""
+        levels = {}
+        positions = {}
+        
+        result = self.engine._adjust_position_for_collisions(
+            5.0, 2.0, 3, 'Group1', levels, positions
+        )
+        
+        self.assertEqual(result, 5.0)
+    
+    def test_adjust_position_with_collision(self):
+        """Test position adjustment with collision."""
+        levels = {'Group2': 3}
+        positions = {'Group2': (5.0, ['X', 'Y'])}  # Width 2.0, ends at 7.0
+        
+        result = self.engine._adjust_position_for_collisions(
+            6.0, 2.0, 3, 'Group1', levels, positions
+        )
+        
+        # Should be shifted to 7.0 + 2.0 = 9.0
+        self.assertEqual(result, 9.0)
+    
+    def test_adjust_position_different_level(self):
+        """Test no adjustment for different y-levels."""
+        levels = {'Group2': 5}  # Different level
+        positions = {'Group2': (5.0, ['X'])}
+        
+        result = self.engine._adjust_position_for_collisions(
+            5.0, 2.0, 3, 'Group1', levels, positions
+        )
+        
+        self.assertEqual(result, 5.0)
+    
+    def test_adjust_position_no_overlap(self):
+        """Test no adjustment when groups don't overlap."""
+        levels = {'Group2': 3}
+        positions = {'Group2': (0.0, ['X'])}  # Ends at 0.0
+        
+        result = self.engine._adjust_position_for_collisions(
+            3.0, 2.0, 3, 'Group1', levels, positions
+        )
+        
+        self.assertEqual(result, 3.0)
+    
+    # Tests for integration scenarios
+    def test_compute_layout_bottom_up_simple(self):
+        """Test complete layout computation for simple case."""
+        group_name_to_group = {
+            'Bottom': {'elements': ['A']},
+            'Top': {'elements': ['B']}
+        }
+        element_to_group = {'A': 'Bottom', 'B': 'Top'}
+        outgoing = {'B': 'A'}
+        incoming = {'A': ['B']}
+        
+        engine = LayoutEngine()
+        levels, positions = engine.compute_layout_bottom_up(
+            group_name_to_group, element_to_group, outgoing, incoming
+        )
+        
+        # Bottom should be at y=0, Top at y=1
+        self.assertIn('Bottom', levels)
+        self.assertIn('Top', levels)
+        self.assertLess(levels['Bottom'], levels['Top'])
+        
+        # Both should have positions
+        self.assertIn('Bottom', positions)
+        self.assertIn('Top', positions)
+    
+    def test_compute_layout_bottom_up_no_links(self):
+        """Test layout with no links between groups."""
+        group_name_to_group = {
+            'G1': {'elements': ['A']},
+            'G2': {'elements': ['B']}
+        }
+        element_to_group = {'A': 'G1', 'B': 'G2'}
+        outgoing = {}
+        incoming = {}
+        
+        engine = LayoutEngine()
+        levels, positions = engine.compute_layout_bottom_up(
+            group_name_to_group, element_to_group, outgoing, incoming
+        )
+        
+        # Both should be placed
+        self.assertEqual(len(levels), 2)
+        self.assertEqual(len(positions), 2)
+    
+    # Additional tests for uncovered branches
+    def test_place_target_groups(self):
+        """Test placing target groups centered."""
+        levels = {}
+        positions = {}
+        node_positions = {}
+        
+        self.engine._place_target_groups(
+            {'Group1'}, 3, levels, positions, node_positions
+        )
+        
+        self.assertEqual(levels['Group1'], 3)
+        self.assertIn('Group1', positions)
+        # Group1 has 2 elements, should be centered around 6.0
+        start_x, elements = positions['Group1']
+        self.assertEqual(elements, ['A', 'B'])
+    
+    def test_place_target_groups_single_element(self):
+        """Test placing single element target group."""
+        levels = {}
+        positions = {}
+        node_positions = {}
+        
+        self.engine._place_target_groups(
+            {'Group2'}, 3, levels, positions, node_positions
+        )
+        
+        # Single element should be at 6.0
+        start_x, elements = positions['Group2']
+        self.assertEqual(start_x, 6.0)
+    
+    def test_place_source_groups_above_targets(self):
+        """Test placing source groups above targets."""
+        levels = {}
+        positions = {'Group2': (6.0, ['C'])}
+        node_positions = {}
+        
+        source_to_target = {'Group1': 'Group2'}
+        
+        self.engine._place_source_groups_above_targets(
+            source_to_target, 3, levels, positions, node_positions
+        )
+        
+        # Source should be at y_level + 1 = 4
+        self.assertEqual(levels['Group1'], 4)
+    
+    def test_select_groups_by_priority_with_incoming(self):
+        """Test selecting groups with priority for those with incoming."""
+        row_groups = ['Group1', 'Group2']
+        groups_with_incoming = ['Group1']
+        groups_without_incoming = ['Group2']
+        
+        result = self.engine._select_groups_by_priority(
+            row_groups, groups_with_incoming, groups_without_incoming
+        )
+        
+        # Should return groups with incoming
+        self.assertEqual(result, ['Group1'])
+    
+    def test_select_groups_by_priority_without_incoming(self):
+        """Test selecting groups when none have incoming."""
+        row_groups = ['Group1', 'Group2']
+        groups_with_incoming = []
+        groups_without_incoming = ['Group1', 'Group2']
+        
+        result = self.engine._select_groups_by_priority(
+            row_groups, groups_with_incoming, groups_without_incoming
+        )
+        
+        # Should return all groups without incoming
+        self.assertEqual(len(result), 2)
+    
+    def test_sort_groups_by_distance_from_center(self):
+        """Test sorting groups by distance from center."""
+        groups_to_move = ['Group1', 'Group2']
+        outgoing = {'A': 'X', 'C': 'Y'}
+        node_positions = {'X': 8.0, 'Y': 4.0}  # 8.0 is farther from 6.0 than 4.0
+        
+        self.engine.element_to_group.update({'X': 'GroupX', 'Y': 'GroupY'})
+        
+        result = self.engine._sort_groups_by_distance_from_center(
+            groups_to_move, outgoing, node_positions
+        )
+        
+        # Group2 (target at 4.0, dist=2.0) should come before Group1 (target at 8.0, dist=2.0)
+        # Actually both are distance 2.0, so order should be maintained or by name
+        self.assertIn('Group1', result)
+        self.assertIn('Group2', result)
+    
+    def test_move_groups_until_fit(self):
+        """Test moving groups until row fits."""
+        group_name_to_group = {
+            'G1': {'elements': ['A']},
+            'G2': {'elements': ['B']},
+            'G3': {'elements': ['C', 'D', 'E', 'F', 'G', 'H']}, # Wide group
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        
+        sorted_groups = ['G3', 'G2', 'G1']
+        row_groups = ['G1', 'G2', 'G3']
+        max_width = 5.0  # Small width
+        
+        keep, move = self.engine._move_groups_until_fit(
+            sorted_groups, row_groups, max_width
+        )
+        
+        # Should move groups until width fits
+        self.assertGreater(len(move), 0)
+    
+    def test_split_overcrowded_row_fallback(self):
+        """Test fallback splitting when no prioritized groups."""
+        group_name_to_group = {
+            'G1': {'elements': ['A']},
+            'G2': {'elements': ['B']},
+        }
+        self.engine.group_name_to_group = group_name_to_group
+        self.engine.element_to_group = {'A': 'G1', 'B': 'G2'}
+        
+        row_groups = ['G1', 'G2']
+        groups_with_incoming = []
+        groups_without_incoming = []
+        outgoing = {}
+        node_positions = {}
+        max_width = 0.1  # Very small
+        
+        keep, move = self.engine._split_overcrowded_row(
+            row_groups, groups_with_incoming, groups_without_incoming,
+            outgoing, node_positions, max_width
+        )
+        
+        # Should split in half as fallback
+        self.assertEqual(len(keep), 1)
+        self.assertEqual(len(move), 1)
+    
+    def test_place_groups_on_row_centered_by_target(self):
+        """Test placing groups centered by their targets."""
+        levels = {}
+        positions = {}
+        node_positions = {'X': 5.0}
+        outgoing = {'A': 'X'}
+        self.engine.element_to_group['X'] = 'GroupX'
+        
+        self.engine._place_groups_on_row_centered_by_target(
+            ['Group1'], 3, levels, positions, node_positions, outgoing
+        )
+        
+        self.assertEqual(levels['Group1'], 3)
+        self.assertIn('Group1', positions)
+
+
+if __name__ == '__main__':
+    unittest.main()
