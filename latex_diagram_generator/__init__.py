@@ -9,6 +9,7 @@ from .text_parser import parse_text_format
 from .conflict_resolver import ConflictResolver
 from .layout_engine import LayoutEngine
 from .latex_generator import LaTeXGenerator
+from .web_service import DiagramWebService
 
 __all__ = [
     'DiagramGenerator',
@@ -16,4 +17,5 @@ __all__ = [
     'ConflictResolver',
     'LayoutEngine',
     'LaTeXGenerator',
+    'DiagramWebService',
 ]

@@ -8,19 +8,22 @@ This tool takes a text or JSON file describing a diagram structure and generates
 
 ## Installation
 
-No external dependencies required - uses only Python standard library.
-
 ```bash
-chmod +x diagram_generator.py
+make install    # Creates venv and installs all dependencies
 ```
 
 ## Usage
 
-### Basic Usage
+### Web Interface (Recommended for Non-Technical Users)
+Start the web server:
 
 ```bash
-./diagram_generator.py diagrams/example.txt
+make server
 ```
+
+Then open your browser to **http://localhost:5000**
+
+### Command-Line Usage
 
 ### Using the Shell Script
 

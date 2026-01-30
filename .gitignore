@@ -5,6 +5,13 @@ diagrams/
 *.pdf
 *.dvi
 
+# Web server temp files
+temp_diagrams/
+
+# Virtual environment
+venv/
+env/
+ENV/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
