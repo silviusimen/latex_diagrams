@@ -26,7 +26,7 @@ venv:
 	@echo "Next step: make install"
 
 install-packages-ubuntu:
-	sudo apt install -y python3 texlive-latex-base texlive-latex-extra imagemagick
+	sudo apt install -y python3 python3-venv texlive-latex-base texlive-latex-extra imagemagick
 
 install: install-packages-ubuntu venv
 	@echo "Installing dependencies in virtual environment..."
