@@ -23,15 +23,16 @@ class DiagramWebService:
     """
     
     DEFAULT_EXAMPLE = """# Groups (multi-element groups use [brackets])
-P1
-P2
-P3
-[P4 + P5] underline
-C
+P1 at (0, 0)
+P2 at (0, 1)
+P3 at (0, 2)
+[P4 + P5] underline at (0, 3)
+C at (2.5, 4)
 
 # Links
 P1 -> P2 -> P3 -> P4
 [P4 + P5] -> C
+
 """
     
     def __init__(self, temp_dir: str = 'temp_diagrams', template_path: str = 'templates/template.tex'):
@@ -77,7 +78,15 @@ P1 -> P2 -> P3 -> P4
             # Generate LaTeX
             generator = DiagramGenerator(spec, template_path=self.template_path)
             latex_code = generator.generate_latex()
-            
+            # Also generate the input with rendered positions
+            input_with_positions = None
+            try:
+                temp_input_path = output_dir / 'input_with_positions.txt'
+                generator.export_input_with_positions(str(temp_input_path))
+                with open(temp_input_path, 'r') as f:
+                    input_with_positions = f.read()
+            except Exception:
+                input_with_positions = None
             # Save LaTeX file
             tex_file = output_dir / 'diagram.tex'
             with open(tex_file, 'w') as f:
@@ -102,7 +111,8 @@ P1 -> P2 -> P3 -> P4
                 'image_url': f'/image/{diagram_id}',
                 'download_tex_url': f'/download/{diagram_id}/tex',
                 'download_pdf_url': f'/download/{diagram_id}/pdf',
-                'download_png_url': f'/download/{diagram_id}/png'
+                'download_png_url': f'/download/{diagram_id}/png',
+                'input_with_positions': input_with_positions
             }
             
         except Exception as e:

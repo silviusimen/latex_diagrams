@@ -7,6 +7,7 @@ import unittest
 import tempfile
 import shutil
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 from latex_diagram_generator.web_service import DiagramWebService
 
 
@@ -51,30 +52,32 @@ class TestDiagramWebService(unittest.TestCase):
         self.assertFalse(success)
         self.assertIn('error', result)
     
-    def test_valid_specification_structure(self):
+    @patch.object(DiagramWebService, '_convert_pdf_to_png')
+    @patch.object(DiagramWebService, '_compile_latex')
+    def test_valid_specification_structure(self, mock_compile, mock_convert):
         """Test that valid specification creates proper structure."""
+        # Mock successful compilation and conversion
+        mock_compile.return_value = (True, {})
+        mock_convert.return_value = (True, {})
+        
         spec = """P1
 P2
 P1 -> P2
 """
         success, result = self.service.generate_diagram(spec)
         
-        # Even if compilation tools aren't installed, the structure should be created
-        if not success:
-            # If it failed, it should be due to missing tools, not parsing
-            self.assertTrue(
-                'pdflatex not found' in result.get('error', '') or
-                'LaTeX compilation' in result.get('error', '') or
-                'ImageMagick' in result.get('error', '')
-            )
-        else:
-            # If successful, check the result structure
-            self.assertIn('latex', result)
-            self.assertIn('diagram_id', result)
-            self.assertIn('image_url', result)
-            self.assertIn('download_tex_url', result)
-            self.assertIn('download_pdf_url', result)
-            self.assertIn('download_png_url', result)
+        # Should succeed with mocked compilation
+        self.assertTrue(success)
+        self.assertIn('latex', result)
+        self.assertIn('diagram_id', result)
+        self.assertIn('image_url', result)
+        self.assertIn('download_tex_url', result)
+        self.assertIn('download_pdf_url', result)
+        self.assertIn('download_png_url', result)
+        
+        # Verify compilation methods were called
+        self.assertTrue(mock_compile.called)
+        self.assertTrue(mock_convert.called)
     
     def test_get_file_path_valid_types(self):
         """Test getting file paths for valid file types."""

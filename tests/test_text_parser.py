@@ -8,6 +8,40 @@ from latex_diagram_generator import parse_text_format
 
 
 class TestTextFormatParser(unittest.TestCase):
+    def test_export_input_with_positions(self):
+            """Test exporting input file with rendered positions."""
+            import os
+            from latex_diagram_generator import DiagramGenerator
+            text = """
+            [A B] underline
+            C
+            # Links
+            A -> C
+            """
+            spec = parse_text_format(text)
+            generator = DiagramGenerator(spec)
+            output_path = 'test_with_positions.txt'
+            generator.export_input_with_positions(output_path)
+            with open(output_path, 'r') as f:
+                    content = f.read()
+            os.remove(output_path)
+            self.assertIn('at (', content)
+
+    def test_group_with_position_override(self):
+        """Test parsing group with at (x, y) position override."""
+        text = """
+        # Groups
+        [A B C] at (5, 11)
+        D at (2.5, 7)
+        """
+        spec = parse_text_format(text)
+        self.assertEqual(len(spec['groups']), 2)
+        group1 = spec['groups'][0]
+        group2 = spec['groups'][1]
+        self.assertIn('override_position', group1)
+        self.assertEqual(group1['override_position'], (5.0, 11.0))
+        self.assertIn('override_position', group2)
+        self.assertEqual(group2['override_position'], (2.5, 7.0))
     """Test cases for text format parser."""
     
     def test_simple_groups(self):

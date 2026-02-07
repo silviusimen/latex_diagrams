@@ -42,7 +42,8 @@ def generate_diagram():
             'image_url': result['image_url'],
             'download_tex_url': result['download_tex_url'],
             'download_pdf_url': result['download_pdf_url'],
-            'download_png_url': result['download_png_url']
+            'download_png_url': result['download_png_url'],
+            'input_with_positions': result.get('input_with_positions', None)
         })
     else:
         # Determine appropriate status code

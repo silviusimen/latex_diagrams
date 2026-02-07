@@ -4,11 +4,20 @@
 import re
 from typing import Dict, List, Tuple
 
+# Import spacing constants
+from .spacing_constants import WITHIN_GROUP_SPACING, TARGET_WIDTH_CM, X_SPACING_MIN, X_SPACING_MAX, X_SPACING_DEFAULT
+
 
 class LaTeXGenerator:
     """Handles LaTeX/TikZ code generation."""
+
+    @staticmethod
+    def _round_coord(val):
+        if abs(val - round(val)) < 1e-4:
+            return int(round(val))
+        return round(val, 1)
     
-    def __init__(self, template_path: str, within_group_spacing: float = 2.0):
+    def __init__(self, template_path: str, within_group_spacing: float = WITHIN_GROUP_SPACING):
         """
         Initialize the LaTeX generator.
         
@@ -39,12 +48,12 @@ class LaTeXGenerator:
             max_width = max(max_width, rightmost)
         
         # Calculate x-spacing: aim for diagram to fit in reasonable width
-        target_width_cm = 12.0  # cm (fits on A4 with margins)
+        target_width_cm = TARGET_WIDTH_CM
         if max_width > 0:
             x_spacing = target_width_cm / max_width
-            x_spacing = max(0.5, min(1.5, x_spacing))  # Clamp to reasonable range
+            x_spacing = max(X_SPACING_MIN, min(X_SPACING_MAX, x_spacing))  # Clamp to reasonable range
         else:
-            x_spacing = 1.0
+            x_spacing = X_SPACING_DEFAULT
         
         # Adjust font size based on x-spacing
         if x_spacing < 0.8:
@@ -68,7 +77,7 @@ class LaTeXGenerator:
         """
         return text.lower().replace('+', 'plus').replace('-', 'minus').replace("'", 'p').replace('.', '_').replace(' ', '_')
     
-    def _create_node_for_element(self, elem: str, x: float, y: int) -> Tuple[str, str, str]:
+    def _create_node_for_element(self, elem: str, x: float, y: float, prev_node_id: str = None, next_elem: str = None) -> Tuple[str, str, str]:
         """
         Create a single node definition for an element.
         
@@ -76,13 +85,17 @@ class LaTeXGenerator:
             elem: Element name
             x: X-coordinate
             y: Y-coordinate
+            prev_node_id: ID of the previous node (for special symbols) - DEPRECATED, not used
+            next_elem: Next element name (for special symbols) - DEPRECATED, not used
             
         Returns:
             Tuple of (node_line, node_id, elem)
         """
         base_id = self._sanitize_node_id(elem)
+        rx = self._round_coord(x)
+        ry = self._round_coord(y)
         node_id = f"{base_id}_{int(x)}_{int(y)}"
-        node_line = f"\t\t\t\\node ({node_id})   at ({x}, {y}) {{{elem}}};"
+        node_line = f"\t\t\t\\node ({node_id})   at ({rx}, {ry}) {{{elem}}};"
         return node_line, node_id, elem
     
     def _get_center_node_for_underlined_group(self, group_name: str, group_obj: Dict,
@@ -129,16 +142,26 @@ class LaTeXGenerator:
         for group_name in sorted(levels.keys(), key=lambda g: -levels[g]):
             level = levels[group_name]
             start_x, elements = positions[group_name]
+            group_obj = group_name_to_group[group_name]
+            y_offsets = group_obj.get('y_offsets', {})  # Get per-element y-offsets if any
             
             # Create nodes for each element
+            prev_node_id = None
             for i, elem in enumerate(elements):
                 x = start_x + i * self.WITHIN_GROUP_SPACING
-                node_line, node_id, _ = self._create_node_for_element(elem, x, level)
-                node_positions[elem] = (node_id, x, level)
+                y = level + y_offsets.get(elem, 0)  # Apply y-offset if exists
+                next_elem = elements[i + 1] if i + 1 < len(elements) else None
+                
+                # Create node with context about adjacent nodes
+                node_line, node_id, _ = self._create_node_for_element(elem, x, y, prev_node_id, next_elem)
                 nodes.append(node_line)
+                
+                # Store position for non-special symbols
+                if elem not in ['+', '-', '|']:
+                    node_positions[elem] = (node_id, x, y)
+                    prev_node_id = node_id
             
             # Track center node for underlined groups
-            group_obj = group_name_to_group[group_name]
             center_node_id = self._get_center_node_for_underlined_group(
                 group_name, group_obj, elements, start_x, level
             )
@@ -162,13 +185,18 @@ class LaTeXGenerator:
         start_x, elements = positions[source_group]
         level = levels[source_group]
         
-        if len(elements) > 1:
-            first_elem = elements[0]
-            last_elem = elements[-1]
-            first_x = start_x
-            last_x = start_x + (len(elements) - 1) * self.WITHIN_GROUP_SPACING
+        # Filter out special symbols to find actual nodes
+        actual_nodes = [(i, elem) for i, elem in enumerate(elements) 
+                       if elem not in ['+', '-', '|']]
+        
+        if len(actual_nodes) > 1:
+            first_idx, first_elem = actual_nodes[0]
+            last_idx, last_elem = actual_nodes[-1]
+            first_x = start_x + first_idx * self.WITHIN_GROUP_SPACING
+            last_x = start_x + last_idx * self.WITHIN_GROUP_SPACING
             first_id = f"{self._sanitize_node_id(first_elem)}_{int(first_x)}_{int(level)}"
             last_id = f"{self._sanitize_node_id(last_elem)}_{int(last_x)}_{int(level)}"
+
             return f"\t\t\t\\draw[blue] ({first_id}.south west) -- ({last_id}.south east);"
         return None
     
@@ -226,13 +254,15 @@ class LaTeXGenerator:
         if has_underline and source == source_group:
             # Link from center node of underlined group
             if source_group in group_center_nodes:
-                return group_center_nodes[source_group]
+                center_node = group_center_nodes[source_group]
+                # Add .south anchor to draw from bottom center of the node
+                return f"{center_node}.south"
             else:
                 # Fallback for single-element underlined group
                 start_x, elements = positions[source_group]
                 level = levels[source_group]
                 elem_base = self._sanitize_node_id(elements[0])
-                return f"{elem_base}_{int(start_x)}_{int(level)}"
+                return f"{elem_base}_{int(start_x)}_{int(level)}.south"
         else:
             # Regular link from element
             if source in node_positions:
@@ -361,25 +391,23 @@ class LaTeXGenerator:
     def generate(self, levels, positions, links, group_name_to_group, element_to_group):
         """
         Generate LaTeX code from layout information.
-        
-        Args:
-            levels: Dict mapping group names to y-levels
-            positions: Dict mapping group names to (start_x, elements)
-            links: Dict of source -> target links
-            group_name_to_group: Mapping of group names to group specs
-            element_to_group: Mapping of element names to their containing group
-            
-        Returns:
-            LaTeX code as string
+        Inverts y-coordinates so that the row with the largest y is at the bottom in TikZ.
         """
         # Calculate spacing and font size
         x_spacing, font_size = self._calculate_spacing_and_font(positions)
-        
-        # Generate all components
+
+        # Invert y-levels for TikZ: find max y, then new_y = max_y - y
+        if levels:
+            max_y = max(levels.values())
+            inverted_levels = {k: max_y - v for k, v in levels.items()}
+        else:
+            inverted_levels = levels
+
+        # Generate all components with inverted y
         nodes, underlines, links_code = self._generate_all_components(
-            levels, positions, links, group_name_to_group, element_to_group
+            inverted_levels, positions, links, group_name_to_group, element_to_group
         )
-        
+
         # Load template and apply substitutions
         template = self._load_template()
         return self._apply_template(template, nodes, links_code, underlines, x_spacing, font_size)

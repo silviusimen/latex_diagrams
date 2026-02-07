@@ -6,6 +6,9 @@ Conflict detection for diagram layouts.
 from typing import Dict, List, Tuple
 from .geometric_helper import GeometricHelper
 
+# Import spacing constants
+from .spacing_constants import TEXT_WIDTH, TEXT_HEIGHT, WITHIN_GROUP_SPACING
+
 
 class ConflictDetector:
     """Detects various types of conflicts in diagram layouts."""
@@ -72,7 +75,7 @@ class ConflictDetector:
                     text_overlaps.append((name1, x1, y1, name2, x2, y2))
                 # Horizontal overlap on same level
                 elif abs(y1 - y2) < 0.1:
-                    text_width = 0.64  # Estimate: ~8 chars * 0.08 units
+                    text_width = TEXT_WIDTH  # from spacing_constants
                     if abs(x1 - x2) < text_width:
                         text_overlaps.append((name1, x1, y1, name2, x2, y2))
         
@@ -122,8 +125,8 @@ class ConflictDetector:
             List of (source, target, name, nx, ny) tuples
         """
         arrow_through_text = []
-        text_width = 0.64
-        text_height = 0.3
+        text_width = TEXT_WIDTH
+        text_height = TEXT_HEIGHT
         
         for source, sx, sy, target, tx, ty in arrows:
             for name, (nx, ny) in positions.items():
@@ -143,22 +146,56 @@ class ConflictDetector:
         return arrow_through_text
     
     @staticmethod
-    def detect_all_conflicts(node_positions: Dict, links: Dict) -> Tuple[List, List, List]:
+    def detect_all_conflicts(node_positions: Dict, links: Dict, 
+                           element_to_group: Dict = None, 
+                           group_name_to_group: Dict = None,
+                           group_center_nodes: Dict = None,
+                           positions: Dict = None,
+                           levels: Dict = None,
+                           within_group_spacing: float = WITHIN_GROUP_SPACING) -> Tuple[List, List, List]:
         """
         Detect all types of conflicts in the diagram.
         
         Args:
             node_positions: Dict mapping element names to (node_id, x, y)
             links: Dict of source -> target links
+            element_to_group: Mapping of elements to their containing groups
+            group_name_to_group: Mapping of group names to group specs
+            group_center_nodes: Dict of center node IDs for underlined groups
+            positions: Dict of group positions (start_x, elements)
+            levels: Dict of group y-levels
+            within_group_spacing: Spacing between elements within groups
             
         Returns:
             Tuple of (text_overlaps, arrow_crossings, arrow_through_text)
         """
-        positions = ConflictDetector.build_position_lookup(node_positions)
-        arrows = ConflictDetector.build_arrow_list(links, positions)
+        pos_lookup = ConflictDetector.build_position_lookup(node_positions)
         
-        text_overlaps = ConflictDetector.check_text_overlaps(positions)
+        # Adjust positions for arrows from underlined groups
+        adjusted_positions = pos_lookup.copy()
+        if (element_to_group and group_name_to_group and group_center_nodes and 
+            positions and levels):
+            for source in links.keys():
+                source_group = element_to_group.get(source, source)
+                if source_group in group_name_to_group:
+                    group_obj = group_name_to_group[source_group]
+                    has_underline = group_obj.get('underline', False)
+                    if has_underline and source == source_group and source_group in group_center_nodes:
+                        # For underlined groups, compute center node position from group data
+                        start_x, elements = positions[source_group]
+                        y = levels[source_group]
+                        
+                        # Find middle element (which is the center node)
+                        middle_idx = len(elements) // 2
+                        x = start_x + middle_idx * within_group_spacing
+                        
+                        # Offset y by -0.3 to simulate .south anchor
+                        adjusted_positions[source] = (x, y - 0.3)
+        
+        arrows = ConflictDetector.build_arrow_list(links, adjusted_positions)
+        
+        text_overlaps = ConflictDetector.check_text_overlaps(pos_lookup)
         arrow_crossings = ConflictDetector.check_arrow_crossings(arrows)
-        arrow_through_text = ConflictDetector.check_arrow_through_text(arrows, positions)
+        arrow_through_text = ConflictDetector.check_arrow_through_text(arrows, pos_lookup)
         
         return text_overlaps, arrow_crossings, arrow_through_text

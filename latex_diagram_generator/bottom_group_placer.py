@@ -4,6 +4,9 @@
 from typing import Dict, List, Set
 from .group_positioner import GroupPositioner
 
+# Import spacing constants
+from .spacing_constants import WITHIN_GROUP_SPACING
+
 
 class BottomGroupPlacer:
     """Handles placement of bottom groups with dependency awareness."""
@@ -45,7 +48,9 @@ class BottomGroupPlacer:
             positions[target] = (target_start, target_elements)
             
             for i, elem in enumerate(target_elements):
-                node_positions[elem] = target_start + i * self.WITHIN_GROUP_SPACING
+                # Skip special symbols like '+' - they're visual separators, not nodes
+                if elem not in ['+', '-', '|']:
+                    node_positions[elem] = target_start + i * self.WITHIN_GROUP_SPACING
     
     def place_source_groups_above_targets(self, source_to_target: Dict, y_level: int,
                                            levels: Dict, positions: Dict, node_positions: Dict) -> None:
@@ -82,7 +87,9 @@ class BottomGroupPlacer:
                 positions[source] = (source_start, source_elements)
                 
                 for i, elem in enumerate(source_elements):
-                    node_positions[elem] = source_start + i * self.WITHIN_GROUP_SPACING
+                    # Skip special symbols like '+' - they're visual separators, not nodes
+                    if elem not in ['+', '-', '|']:
+                        node_positions[elem] = source_start + i * self.WITHIN_GROUP_SPACING
     
     def place_dependent_bottom_groups(self, source_to_target, group_names, y_level,
                                        levels, positions, node_positions,

@@ -6,17 +6,42 @@ from typing import Dict, List
 
 class GroupPositioner:
     """Handles individual group positioning and collision detection."""
+
+    def place_group_at(self, group_name: str, x: float, y_level: int, levels: Dict, positions: Dict, node_positions: Dict):
+        """Place a group at a specific x, y position and update node_positions."""
+        group = self.group_name_to_group[group_name]
+        elements = group.get('elements', [group_name])
+        levels[group_name] = y_level
+        positions[group_name] = (x, elements)
+        for i, elem in enumerate(elements):
+            if elem not in ['+', '-', '|']:
+                node_positions[elem] = (elem, x + i * self.WITHIN_GROUP_SPACING, y_level)
+
+    def shift_group_horizontally(self, group_name: str, shift: float, positions: Dict, node_positions: Dict):
+        """Shift a group and its elements horizontally by shift units."""
+        if group_name not in positions:
+            return
+        x, elements = positions[group_name]
+        new_x = x + shift
+        positions[group_name] = (new_x, elements)
+        for i, elem in enumerate(elements):
+            if elem in node_positions:
+                node_id, old_x, y = node_positions[elem]
+                node_positions[elem] = (node_id, old_x + shift, y)
     
-    def __init__(self, group_name_to_group: Dict, within_group_spacing: float = 2.0):
+    def __init__(self, group_name_to_group: Dict, within_group_spacing: float = 2.0, between_group_spacing: float = 2.0):
         """
         Initialize the group positioner.
         
         Args:
             group_name_to_group: Mapping of group names to group specs
             within_group_spacing: Spacing between elements within a group
+            between_group_spacing: Spacing between adjacent groups
         """
         self.group_name_to_group = group_name_to_group
         self.WITHIN_GROUP_SPACING = within_group_spacing
+        self.BETWEEN_GROUP_SPACING = between_group_spacing
+        self.MAX_X_POSITION = 40.0  # Maximum horizontal position allowed
     
     def calculate_group_width(self, elements: List[str]) -> float:
         """
@@ -66,7 +91,7 @@ class GroupPositioner:
             Starting x-coordinate
         """
         if center:
-            total_width = sum(group_widths) + (len(group_names) - 1) * 2.0  # 2.0 spacing between groups
+            total_width = sum(group_widths) + (len(group_names) - 1) * self.BETWEEN_GROUP_SPACING
             return 6.0 - total_width / 2.0
         return 0.0
     
@@ -92,9 +117,12 @@ class GroupPositioner:
         positions[group_name] = (current_x, elements)
         
         for i, elem in enumerate(elements):
-            node_positions[elem] = current_x + i * self.WITHIN_GROUP_SPACING
+            # Skip special symbols like '+' - they're visual separators, not nodes
+            if elem not in ['+', '-', '|']:
+                # Always assign as (elem, x, y_level)
+                node_positions[elem] = (elem, current_x + i * self.WITHIN_GROUP_SPACING, y_level)
         
-        return current_x + width + 2.0  # Move to next group position
+        return current_x + width + self.BETWEEN_GROUP_SPACING  # Move to next group position
     
     def adjust_position_for_collisions(self, start_x: float, width: float, y_level: int,
                                         group_name: str, levels: Dict, positions: Dict) -> float:
@@ -159,4 +187,6 @@ class GroupPositioner:
         positions[group_name] = (start_x, elements)
         
         for i, elem in enumerate(elements):
-            node_positions[elem] = start_x + i * self.WITHIN_GROUP_SPACING
+            # Skip special symbols like '+' - they're visual separators, not nodes
+            if elem not in ['+', '-', '|']:
+                node_positions[elem] = (elem, start_x + i * self.WITHIN_GROUP_SPACING, y_level)

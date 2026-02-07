@@ -5,6 +5,9 @@ from typing import Dict, List, Tuple
 from .group_positioner import GroupPositioner
 from .dependency_analyzer import DependencyAnalyzer
 
+# Import spacing constants
+from .spacing_constants import WITHIN_GROUP_SPACING, BETWEEN_GROUP_SPACING
+
 
 class RowPlacer:
     """Handles row placement with overflow/splitting logic."""
@@ -26,9 +29,9 @@ class RowPlacer:
         self.analyzer = analyzer
         self.WITHIN_GROUP_SPACING = positioner.WITHIN_GROUP_SPACING
     
-    def place_groups_on_row(self, group_names, y_level, levels, positions, node_positions, center=False):
+    def place_groups_on_row(self, group_names, y_level, levels, positions, node_positions, center=False, force_sequential=False):
         """
-        Place a list of groups on a single row.
+        Place a list of groups on a single row, wrapping to new rows if MAX_X_POSITION is exceeded.
         
         Args:
             group_names: List of group names to place
@@ -37,6 +40,7 @@ class RowPlacer:
             positions: Dict to update with group positions
             node_positions: Dict to update with element positions
             center: If True, center the groups around x=6.0
+            force_sequential: If True, place all groups sequentially without wrapping (pre-split)
         """
         if not group_names:
             return
@@ -47,11 +51,29 @@ class RowPlacer:
         # Calculate starting x position
         current_x = self.positioner.calculate_starting_x(group_names, group_widths, center)
         
-        # Place each group
-        for group_name, width in zip(group_names, group_widths):
-            current_x = self.positioner.place_group_at_position(
-                group_name, width, current_x, y_level, levels, positions, node_positions
-            )
+        if force_sequential:
+            # Place all groups on this row sequentially (no wrapping - already pre-split)
+            for group_name, width in zip(group_names, group_widths):
+                current_x = self.positioner.place_group_at_position(
+                    group_name, width, current_x, y_level, levels, positions, node_positions
+                )
+        else:
+            # Place each group, wrapping to new row if MAX_X_POSITION is exceeded
+            # Use fractional offsets (0.1) to keep wrapped groups within same topological layer
+            current_row_y = y_level
+            row_offset_count = 0
+            for group_name, width in zip(group_names, group_widths):
+                # Check if this group would exceed MAX_X_POSITION
+                if current_x > 0 and self.would_exceed_max_x(current_x, width):
+                    # Wrap to new row with small fractional offset to maintain layer structure
+                    row_offset_count += 1
+                    current_row_y = y_level + (row_offset_count * 0.1)
+                    current_x = 0.0
+                    print(f"  Wrapping {group_name} to y={current_row_y:.1f} (would exceed x=40)")
+                
+                current_x = self.positioner.place_group_at_position(
+                    group_name, width, current_x, current_row_y, levels, positions, node_positions
+                )
     
     def calculate_row_width(self, group_names):
         """Calculate total width needed for groups including spacing."""
@@ -68,9 +90,14 @@ class RowPlacer:
                 width = 0
             total += width
             if i < len(group_names) - 1:
-                total += 2.0  # Inter-group spacing
+                total += self.positioner.BETWEEN_GROUP_SPACING  # Inter-group spacing
         
         return total
+    
+    def would_exceed_max_x(self, current_x: float, group_width: float) -> bool:
+        """Check if placing a group would exceed MAX_X_POSITION."""
+        end_x = current_x + group_width
+        return end_x > self.positioner.MAX_X_POSITION
     
     def classify_groups_by_incoming(self, group_names: List[str], incoming: Dict) -> Tuple[List[str], List[str]]:
         """
@@ -333,7 +360,25 @@ class RowPlacer:
         if not group_names:
             return True
         
-        MAX_ROW_WIDTH = 20.0  # Maximum x-span for a row
+        MAX_ROW_WIDTH = 100.0  # Maximum x-span for a row (very generous for complex diagrams)
+        MAX_GROUPS_PER_ROW = 3  # Maximum groups per row to force vertical spreading
+        
+        # If too many groups, force split regardless of width
+        if len(group_names) > MAX_GROUPS_PER_ROW:
+            mid = MAX_GROUPS_PER_ROW
+            first_batch = group_names[:mid]
+            second_batch = group_names[mid:]
+            
+            # Place first batch
+            self.place_groups_on_row(first_batch, start_y, levels, positions, node_positions)
+            print(f"  Placed {len(first_batch)} groups on row {start_y}: {first_batch}")
+            placed_groups.update(first_batch)
+            
+            # Recursively place second batch on next row
+            return self.place_groups_on_row_with_overflow(
+                second_batch, start_y + 1, levels, positions, 
+                node_positions, incoming, outgoing, placed_groups
+            )
         
         # Classify groups by incoming links
         groups_with_incoming, groups_without_incoming = self.classify_groups_by_incoming(

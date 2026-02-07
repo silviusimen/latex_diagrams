@@ -345,7 +345,7 @@ class TestLatexGenerator(unittest.TestCase):
             group_center_nodes, positions, levels, node_positions
         )
         
-        self.assertEqual(source_id, 'center_node_id')
+        self.assertEqual(source_id, 'center_node_id.south')
     
     def test_get_source_node_id_from_underlined_group_fallback(self):
         """Test fallback for underlined group without center node."""
@@ -361,7 +361,7 @@ class TestLatexGenerator(unittest.TestCase):
             group_center_nodes, positions, levels, node_positions
         )
         
-        self.assertEqual(source_id, 'a_0_5')
+        self.assertEqual(source_id, 'a_0_5.south')
     
     def test_get_source_node_id_from_regular_element(self):
         """Test getting source node from regular element."""

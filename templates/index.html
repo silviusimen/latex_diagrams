@@ -375,17 +375,22 @@
                     // Show output
                     placeholder.style.display = 'none';
                     output.classList.add('visible');
-                    
+
                     // Set image
                     document.getElementById('diagramImage').src = data.image_url + '?t=' + Date.now();
-                    
+
                     // Set download links
                     document.getElementById('downloadPng').href = data.download_png_url;
                     document.getElementById('downloadPdf').href = data.download_pdf_url;
                     document.getElementById('downloadTex').href = data.download_tex_url;
-                    
+
                     // Set LaTeX code
                     document.getElementById('latexCode').value = data.latex;
+
+                    // Update input box with rendered positions if available
+                    if (data.input_with_positions) {
+                        document.getElementById('specification').value = data.input_with_positions;
+                    }
                 }
             })
             .catch(err => {
